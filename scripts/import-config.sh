@@ -27,4 +27,6 @@ QUERIES=(
   "AI Engineer" "Agentic AI" "Engenheiro de IA" "Agente de IA" "GenAI" "LLM Engineer"
   "AI Governance" "Governança de IA" "Gestão de Dados" "Data Manager" "AI Manager"
   "Gestão IA" "Gestor Dados" "Gestor IA"
+  "Gerente de Dados" "Gestor de Dados" "Gerente de IA" "Gestor de IA"
+  "Head of Data" "Diretor de Dados"
 )
