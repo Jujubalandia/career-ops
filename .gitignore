@@ -1,3 +1,6 @@
+# Scheduled-scan logs (scripts/run-daily-scan.sh, cron)
+logs/
+
 # Personal data (user fills these)
 cv.md
 article-digest.md
