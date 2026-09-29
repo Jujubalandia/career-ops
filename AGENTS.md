@@ -342,6 +342,7 @@ Two separate axes:
 | Batch processes offers | `batch` |
 | Asks about rejection patterns, wants to improve targeting, or wants to match interview answers to best-fit roles | `patterns` |
 | Wants to know whether the evaluation scores are predicting their real outcomes (interviews/offers) | `calibrate` — advisory report over `/outcome` data; never changes scoring |
+| Wants a daily/weekly report on scanned postings — by category, region, remote/hybrid/onsite, or best-fit | `observ` — zero-token analytics over `data/pipeline.md`; never writes |
 | Receives an offer/contract and wants help understanding it before signing | `offer-prep` — clause walk with neutral tags + lawyer question list; describes, never judges; no verdicts, no online research; optional draft-only negotiation reply from the "Items to raise" list |
 | Wants to broaden the search with adjacent job titles suggested from the CV | `titles` |
 | Asks what skills to learn, wants a skill-gap analysis of their pipeline | `upskill` |

@@ -38,6 +38,7 @@ table in `AGENTS.md` (mirrored in `CLAUDE.md`).
 | `tracker.md` | `tracker` | Applications tracker overview |
 | `patterns.md` | `patterns` | Rejection pattern detector |
 | `calibrate.md` | `calibrate` | Advisory report: do your evaluation scores predict your real outcomes? Reads `/outcome` data; never changes scoring |
+| `observ.md` | `observ` | Zero-token daily analytics over `data/pipeline.md`: category/region/remote-hybrid-onsite counts, best-fit list |
 | `titles.md` | `titles` | Adjacent job-title suggestions |
 | `training.md` | `training` | Training & course evaluation |
 | `project.md` | `project` | Portfolio project evaluation |

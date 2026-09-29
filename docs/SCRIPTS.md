@@ -1185,6 +1185,25 @@ Runs:       — no data (data/scan-runs.tsv missing; created by the next scan)
 
 ---
 
+## observ.mjs
+
+Zero-token daily analytics over `data/pipeline.md`: category counts (AI Management, Data Management, AI Governance, AI Engineering, Data Engineering, Other), remote-by-category, on-site/hybrid/remote split, counts by region (including a Brazil interior-São-Paulo Campinas/Bragança-Paulista/Extrema-MG breakout), postings grouped by posted date, a best-fit shortlist from the existing `rank:` field, and the interior-SP/Extrema-MG IT postings specifically. Every category/region/work-mode bucket is a keyword classification of free-text title/location, not a verified fact — the script's own `--summary` output says so.
+
+```bash
+node observ.mjs --summary                     # today's posted-date window, human-readable
+node observ.mjs                                # JSON, today's posted-date window
+node observ.mjs --date 2026-09-25 --summary    # a specific posted date
+node observ.mjs --days 7 --summary             # rolling window ending at --date
+node observ.mjs --top 5                        # best-fit shortlist size (default 10)
+node observ.mjs --self-test
+```
+
+`categoryCounts`/`remoteByCategory`/`workMode`/`byRegion`/`interiorSPRoles` are scoped to the `--date`/`--days` window (default: today only). `byPostedDate` and `bestFit` are intentionally global — a one-day date histogram is degenerate, and "which pending posting fits me best" isn't a today-only question. On a missing `data/pipeline.md`, every section but `metadata` is `null`.
+
+**Exit codes:** `0` success (including "no data/pipeline.md yet"), `1` bad `--date`/unrecognized flag, or `--self-test` failure.
+
+---
+
 ## data/scan-runs.tsv
 
 `scan.mjs` appends one row to this file after each non-dry scan run, recording how many companies/boards it checked, how many postings it found vs. filtered out vs. flagged as duplicates vs. added, and how many errors occurred. `--dry-run` scans never write to this file. Stats appended include:

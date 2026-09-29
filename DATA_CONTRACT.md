@@ -117,6 +117,7 @@ These files contain system logic, scripts, templates, and instructions that impr
 | `modes/interview-prep.md` | Company-specific interview prep instructions |
 | `modes/interview-redflag.md` | Company red-flag detection instructions |
 | `modes/outcome.md` | Application outcome instructions |
+| `modes/observ.md` | Daily pipeline analytics dashboard instructions |
 | `modes/interview/*` | Interview prep planning, practice, and debrief skills |
 | `modes/agent-inbox.md` | Agent inbox (queued requests) instructions |
 | `modes/reply-watch.md` | Employer reply classification instructions |
