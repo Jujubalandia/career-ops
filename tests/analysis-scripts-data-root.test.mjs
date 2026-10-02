@@ -50,11 +50,6 @@ function fixture() {
     '---', 'company: Acme', 'role: Backend Engineer', 'round: 1',
     'date: 2026-08-26', 'competencies: [system-design]', '---', 'Round 1 notes.', '',
   ].join('\n'));
-  writeFileSync(join(dataRoot, 'data', 'pipeline.md'), [
-    '# Pipeline — Pending URLs', '', '## Pending', '',
-    '- [ ] https://x.test/1 | Acme | AI Manager | Remoto | posted: 2026-09-28',
-    '',
-  ].join('\n'));
   return { dataRoot, decoyCwd };
 }
 
@@ -95,19 +90,6 @@ test('calibrate reads the configured data root', () => {
   } finally { cleanup(f); }
 });
 
-test('observ reads the configured data root', () => {
-  const f = fixture();
-  try {
-    const r = run('observ.mjs', ['--summary', '--date', '2026-09-28'], f);
-    assert.doesNotMatch(
-      r.all,
-      /No data\/pipeline\.md found/i,
-      `observ looked in the checkout, not the data root:\n${r.all.slice(0, 400)}`,
-    );
-    assert.match(r.all, /AI Management: 1/, `the fixture's pending row wasn't classified:\n${r.all.slice(0, 400)}`);
-  } finally { cleanup(f); }
-});
-
 test('weekly-digest reads the configured data root', () => {
   const f = fixture();
   try {
@@ -128,7 +110,6 @@ test('and none of them writes into the cwd it was launched from', () => {
   try {
     run('funnel-velocity.mjs', ['--summary'], f);
     run('calibrate.mjs', ['--summary'], f);
-    run('observ.mjs', ['--summary', '--date', '2026-09-28'], f);
     run('weekly-digest.mjs', ['--summary'], f);
     assert.deepEqual(readdirSync(f.decoyCwd), [], 'a script wrote into the directory it was launched from');
   } finally { cleanup(f); }
@@ -152,7 +133,7 @@ test('no analysis script derives a data path from its own directory', () => {
   // and joins user-layer paths onto it, which reads as correct and is not.
   const offenders = [];
   const USER_LAYER = /join\(\s*(CAREER_OPS|CODE_ROOT)\s*,\s*'(data|interview-prep|reports|output|jds|documents)[/']/;
-  for (const file of ['funnel-velocity.mjs', 'calibrate.mjs', 'weekly-digest.mjs', 'stats.mjs', 'company-history.mjs', 'observ.mjs']) {
+  for (const file of ['funnel-velocity.mjs', 'calibrate.mjs', 'weekly-digest.mjs', 'stats.mjs', 'company-history.mjs']) {
     const src = readFileSync(join(ROOT, file), 'utf-8');
     for (const line of src.split('\n')) {
       if (USER_LAYER.test(line)) offenders.push(`${file}: ${line.trim().slice(0, 80)}`);
