@@ -1594,6 +1594,15 @@ search_queries:
 #   provider: remotive
 #   enabled: true
 #
+# - name: RemoteYeah                      # remote board, RSS; items carry a structured location
+#   provider: remoteyeah                  # ("Brazil", "Latin America", "Worldwide"); one request
+#   enabled: true
+#
+# - name: TryRemotely                     # official public JSON API, no key, 100 req/min/IP
+#   provider: tryremotely                 # newest-first; stops once a page is older than the scan window
+#   max_pages: 20                         # optional — 100 postings/page (default 20 ≈ 1.5 days, cap 50 ≈ 3.9 days)
+#   enabled: true                         # attribution required: rows link to the tryremotely.com listing
+#
 # - name: Get on Board
 #   provider: getonbrd
 #   enabled: true
