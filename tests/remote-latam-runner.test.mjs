@@ -1,47 +1,28 @@
 // tests/remote-latam-runner.test.mjs — catalog, funnel and CLI of scripts/scan-remote-latam.mjs.
-// No network: providers are stubs injected through main()'s `deps`, and the queue,
-// the scan history and the run log all live in a temp dir (env set BEFORE the import,
-// because scan.mjs resolves those paths at load time).
-import { mkdtempSync, readFileSync, writeFileSync } from 'fs';
+// No network. The pure parts (catalog, title/age gates, funnel) run in this process.
+// The CLI scenario runs in a CHILD process with its own environment: scan.mjs resolves
+// the queue / history paths from env at load time, and test-all.mjs runs every suite
+// in one process, so setting CAREER_OPS_* here would leak into every later test.
+import { mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
+import { spawnSync } from 'child_process';
 import { pathToFileURL } from 'url';
-import { pass, fail, rmSync, ROOT } from './helpers.mjs';
+import { pass, fail, rmSync, ROOT, NODE } from './helpers.mjs';
 
 console.log('\nRemote LATAM — runner');
-
-const TMP = mkdtempSync(join(tmpdir(), 'remote-latam-runner-'));
-const PIPELINE = join(TMP, 'pipeline.md');
-const HISTORY = join(TMP, 'scan-history.tsv');
-const LOG = join(TMP, 'remote-latam.tsv');
-process.env.CAREER_OPS_PIPELINE = PIPELINE;
-process.env.CAREER_OPS_SCAN_HISTORY = HISTORY;
-process.env.CAREER_OPS_REMOTE_LATAM_LOG = LOG;
-const SKELETON = '# Pipeline\n\n## Pending\n\n## Processed\n';
-writeFileSync(PIPELINE, SKELETON);
 
 const ok = (cond, msg) => (cond ? pass(msg) : fail(msg));
 const throwsWith = (fn, re, msg) => {
   try { fn(); fail(`${msg}: did not throw`); }
   catch (e) { ok(re.test(e.message), `${msg} (${e.message.slice(0, 70)})`); }
 };
-const rejectsWith = async (promise, re, msg) => {
-  try { await promise; fail(`${msg}: did not reject`); }
-  catch (e) { ok(re.test(e.message), `${msg} (${e.message.slice(0, 70)})`); }
-};
-/** Run fn while capturing console.log; returns the captured text. */
-async function capture(fn) {
-  const real = console.log;
-  const lines = [];
-  console.log = (...a) => lines.push(a.join(' '));
-  try { return { result: await fn(), out: lines.join('\n') }; }
-  finally { console.log = real; }
-}
-const pendingRows = () => readFileSync(PIPELINE, 'utf8').split('\n').filter((l) => l.startsWith('- [ ] '));
+
+const TMP = mkdtempSync(join(tmpdir(), 'remote-latam-runner-'));
 
 try {
-  const mod = await import(pathToFileURL(join(ROOT, 'scripts/scan-remote-latam.mjs')).href);
-  const { parseCatalog, titleGate, ageInDays, runFunnel, main, LOG_HEADER } = mod;
+  const RUNNER_URL = pathToFileURL(join(ROOT, 'scripts/scan-remote-latam.mjs')).href;
+  const { parseCatalog, titleGate, ageInDays, runFunnel, LOG_HEADER } = await import(RUNNER_URL);
   const DAY = 86_400_000;
   const NOW = Date.UTC(2026, 9, 5, 12, 0, 0);
 
@@ -63,19 +44,18 @@ try {
   // The shipped template must always parse, and its providers must exist.
   const tpl = parseCatalog(readFileSync(join(ROOT, 'templates/remote-latam.example.yml'), 'utf8'));
   ok(tpl.sources.length > 0 && tpl.filters.include && tpl.filters.exclude, 'templates/remote-latam.example.yml parses');
-  const { readdirSync } = await import('fs');
   const providerIds = new Set(readdirSync(join(ROOT, 'providers')).filter((f) => f.endsWith('.mjs') && !f.startsWith('_')).map((f) => f.slice(0, -4)));
   const missing = tpl.sources.filter((s) => !providerIds.has(s.provider)).map((s) => s.provider);
   ok(missing.length === 0, `every template source has a provider in providers/ ${missing.length ? `(missing: ${missing})` : ''}`);
 
   // ── title gate: the shipped regexes against real titles from the live dry-runs ─
   const keep = ['Senior AI Engineer', 'Agentic AI Engineer', 'LLM Engineer', 'Staff ML Engineer', 'AI Governance Lead',
-    'Head of Data & AI', 'Data Manager', 'Engenheiro de IA Sênior', 'Gerente de Dados e IA', 'Prompt Engineer',
-    'Back-end Engineer Senior – LLM & Agentic AI'];
+    'AI Governance Analyst', 'Head of Data & AI', 'Data Manager', 'Engenheiro de IA Sênior', 'Gerente de Dados e IA',
+    'Prompt Engineer', 'Back-end Engineer Senior – LLM & Agentic AI', 'Software Engineer, Applied AI (Brazil)'];
   const drop = ['Customer Service Agent', 'Japanese Speaking Customer Service Agent', 'Community Engagement Manager, Data Centers (Texas)',
     'SEO & AI Search Manager', 'AI Content Analyst (No Experience Required)', 'Business Analyst with AI Experience',
-    'Junior AI Engineer', 'Sales Engineer, AI', 'Frontend Developer', 'Real Estate Agent', 'AI Data Annotator', 'Data Engineer',
-    'Estagiário de IA', 'Product Manager, AI'];
+    'Principal Data Operations Analyst', 'AI Trainers Network - Marathi', 'Junior AI Engineer', 'Sales Engineer, AI',
+    'Frontend Developer', 'Real Estate Agent', 'AI Data Annotator', 'Data Engineer', 'Estagiário de IA', 'Product Manager, AI'];
   for (const t of keep) ok(titleGate(t, tpl.filters) === null, `title kept: ${t}`);
   for (const t of drop) ok(titleGate(t, tpl.filters) !== null, `title dropped: ${t}`);
 
@@ -119,15 +99,20 @@ try {
   ok(counts.locUnknown === 1 && offers.filter((o) => o.note.endsWith(' loc?')).length === 1, 'unknown region is kept and tagged loc?');
   ok(offers.every((o) => o.note.startsWith('remote-latam:stub') && o.source === 'remote-latam:stub'), 'note and source name the catalog source');
   ok(offers.filter((o) => o.company === '?').length === 2, "company '?' skips the role dedup (two different firms stay)");
-  ok(snap.seen.has('https://acme-test.example/jobs/ok') || [...snap.seen].some((k) => k.includes('/jobs/ok')), 'snapshot grows as rows are accepted');
+  ok([...snap.seen].some((k) => k.includes('/jobs/ok')), 'snapshot grows as rows are accepted');
   const again = runFunnel(jobs, { sourceId: 'stub2', filters, sinceDays: 7, snapshot: snap, now: NOW });
   ok(again.counts.new === 0, 'a second source cannot queue what the first one already took');
   ok(runFunnel(jobs, { sourceId: 'x', filters, sinceDays: 0, snapshot: mk(), now: NOW }).counts.droppedAge === 0, 'sinceDays 0 disables the age gate');
   ok(runFunnel(undefined, { sourceId: 'x', filters, sinceDays: 7, snapshot: mk() }).counts.fetched === 0, 'undefined jobs does not throw');
 
-  // ── CLI end to end (stub providers, temp queue) ───────────────────────────────
-  const catalogFile = join(TMP, 'catalog.yml');
-  writeFileSync(catalogFile, [
+  // ── CLI end to end, in a child process (stub providers, temp queue) ───────────
+  const PIPELINE = join(TMP, 'pipeline.md');
+  const HISTORY = join(TMP, 'scan-history.tsv');
+  const LOG = join(TMP, 'remote-latam.tsv');
+  const CATALOG = join(TMP, 'catalog.yml');
+  const SKELETON = '# Pipeline\n\n## Pending\n\n## Processed\n';
+  writeFileSync(PIPELINE, SKELETON);
+  writeFileSync(CATALOG, [
     "filters:", "  include: '\\bAI\\b'", "  exclude: 'junior'",
     'sources:',
     '  - {id: alpha, provider: stub-a}',
@@ -136,72 +121,111 @@ try {
     '  - {id: nobody, provider: stub-missing}',
     '  - {id: off, provider: stub-a, enabled: false}',
   ].join('\n'));
-  const calls = { a: 0, b: 0 };
-  const providers = new Map([
-    ['stub-a', { id: 'stub-a', fetch: async (entry) => {
-      calls.a++;
-      return [
-        { title: 'AI Platform Engineer', url: 'https://cli-test.example/a/1', company: 'Cli Test Co', location: 'LATAM', postedAt: Date.now() - DAY },
-        { title: 'AI Agent Lead', url: 'https://cli-test.example/a/2', company: 'Cli Test Co', location: 'Remote' },
-      ];
-    } }],
-    ['stub-b', { id: 'stub-b', fetch: async () => {
-      calls.b++;
-      return [
-        { title: 'AI Platform Engineer', url: 'https://cli-test.example/b/9', company: 'Cli Test Co', location: 'LATAM' }, // role dupe of a/1
-        { title: 'AI Safety Engineer', url: 'https://cli-test.example/b/1', company: 'Beta Test Co', location: 'Brazil' },
-      ];
-    } }],
-    ['stub-broken', { id: 'stub-broken', fetch: async () => { throw new Error('HTTP 500 from the board'); } }],
-  ]);
-  const run = (args) => capture(() => main(['--catalog', catalogFile, ...args], { providers }));
 
-  // dry run: prints, writes nothing to the queue or history
-  let r = await run(['--since', '7', '--dry-run', '--json']);
-  ok(r.result === 2, 'exit code 2 when a source fails (broken + unknown provider)');
-  const summary = JSON.parse(r.out.split('\n').find((l) => l.startsWith('{')));
-  ok(summary.new === 3 && summary.dryRun === true, `dry run reports 3 new (${summary.new})`);
-  ok(pendingRows().length === 0, 'dry run leaves the queue untouched');
-  ok(summary.sources.find((s) => s.id === 'broken').error.includes('HTTP 500'), 'a failing source records its error');
-  ok(summary.sources.find((s) => s.id === 'nobody').error.includes('unknown provider'), 'an unknown provider is reported, not thrown');
-  ok(summary.sources.some((s) => s.id === 'alpha') && !summary.sources.some((s) => s.id === 'off'), 'disabled sources are skipped');
-  ok(summary.sources.find((s) => s.id === 'beta').counts.dupRole === 1, 'cross-source company+role dupe is caught');
+  const CHILD = join(TMP, 'child.mjs');
+  writeFileSync(CHILD, `
+import { readFileSync, writeFileSync, existsSync } from 'node:fs';
+const { main } = await import(process.env.RUNNER_URL);
+const { PIPELINE, HISTORY, LOG, CATALOG, SKELETON } = process.env;
+const DAY = 86400000;
+const calls = { a: 0, b: 0 };
+const providers = new Map([
+  ['stub-a', { id: 'stub-a', fetch: async () => { calls.a++; return [
+    { title: 'AI Platform Engineer', url: 'https://cli-test.example/a/1', company: 'Cli Test Co', location: 'LATAM', postedAt: Date.now() - DAY },
+    { title: 'AI Agent Lead', url: 'https://cli-test.example/a/2', company: 'Cli Test Co', location: 'Remote' },
+  ]; } }],
+  ['stub-b', { id: 'stub-b', fetch: async () => { calls.b++; return [
+    { title: 'AI Platform Engineer', url: 'https://cli-test.example/b/9', company: 'Cli Test Co', location: 'LATAM' },
+    { title: 'AI Safety Engineer', url: 'https://cli-test.example/b/1', company: 'Beta Test Co', location: 'Brazil' },
+  ]; } }],
+  ['stub-broken', { id: 'stub-broken', fetch: async () => { throw new Error('HTTP 500 from the board'); } }],
+]);
+const read = (f) => (existsSync(f) ? readFileSync(f, 'utf8') : '');
+const steps = JSON.parse(readFileSync(process.argv[2], 'utf8'));
+const results = [];
+for (const step of steps) {
+  if (step.reset) { writeFileSync(PIPELINE, SKELETON); writeFileSync(HISTORY, ''); }
+  const real = console.log;
+  const lines = [];
+  console.log = (...a) => lines.push(a.join(' '));
+  let code = null, error = '';
+  try { code = await main(step.argv, { providers }); } catch (e) { error = String(e.message || e); } finally { console.log = real; }
+  results.push({ argv: step.argv, code, error, out: lines.join('\\n'), pipeline: read(PIPELINE), history: read(HISTORY), log: read(LOG), calls: { ...calls } });
+}
+process.stdout.write(JSON.stringify(results));
+`);
+  const withCatalog = (args) => ['--catalog', CATALOG, ...args];
+  const steps = [
+    { argv: withCatalog(['--since', '7', '--dry-run', '--json']) },            // 0 dry run
+    { argv: withCatalog(['--since', '7']) },                                   // 1 real run
+    { argv: withCatalog(['--since', '7', '--json']) },                         // 2 second run
+    { argv: withCatalog(['--source', 'off', '--dry-run', '--json']) },         // 3 --source on a disabled source
+    { reset: true, argv: withCatalog(['--source', 'alpha', '--limit', '1', '--dry-run', '--json']) }, // 4 --limit
+    { argv: ['--bogus'] },                                                     // 5 argument errors
+    { argv: ['--since', '1', '--since', '2'] },                                // 6
+    { argv: ['--since', '-1'] },                                               // 7
+    { argv: ['--since'] },                                                     // 8
+    { argv: withCatalog(['--source', 'nope']) },                               // 9
+    { argv: ['--help'] },                                                      // 10
+  ];
+  const specFile = join(TMP, 'steps.json');
+  writeFileSync(specFile, JSON.stringify(steps));
+  const run = spawnSync(NODE, [CHILD, specFile], {
+    cwd: ROOT, encoding: 'utf8', timeout: 120_000,
+    env: { ...process.env, RUNNER_URL, PIPELINE, HISTORY, LOG, CATALOG, SKELETON,
+      CAREER_OPS_PIPELINE: PIPELINE, CAREER_OPS_SCAN_HISTORY: HISTORY, CAREER_OPS_REMOTE_LATAM_LOG: LOG },
+  });
+  let R = [];
+  try { R = JSON.parse(run.stdout); } catch { fail(`CLI child produced no JSON (exit ${run.status}): ${(run.stderr || run.stdout).slice(0, 300)}`); }
 
-  // real run: queue, history, sort, log
-  r = await run(['--since', '7']);
-  const rows = pendingRows();
-  ok(rows.length === 3, `3 rows appended (${rows.length})`);
-  ok(rows.every((l) => /\| note: remote-latam:(alpha|beta)/.test(l)), 'rows carry the source note');
-  ok(rows[0].includes('posted:') || rows.some((l) => l.includes('posted:')), 'dated rows carry posted:');
-  const hist = readFileSync(HISTORY, 'utf8').trim().split('\n');
-  ok(hist[0].startsWith('url\t') && hist.length === 4, `scan-history has header + 3 rows (${hist.length})`);
-  ok(hist.slice(1).every((l) => l.split('\t')[2].startsWith('remote-latam:')), 'history portal column names the source');
-  const logLines = readFileSync(LOG, 'utf8').trim().split('\n');
-  ok(logLines[0] === LOG_HEADER.join('\t'), 'run log has the header');
-  ok(logLines.length > 1 && logLines.every((l) => l.split('\t').length === LOG_HEADER.length), 'every log row has one cell per column');
+  if (R.length === steps.length) {
+    const rows = (text) => text.split('\n').filter((l) => l.startsWith('- [ ] '));
+    const json = (i) => JSON.parse(R[i].out.split('\n').find((l) => l.startsWith('{')));
 
-  // second run: everything is now known
-  const before = readFileSync(PIPELINE, 'utf8');
-  r = await run(['--since', '7', '--json']);
-  ok(JSON.parse(r.out.split('\n').find((l) => l.startsWith('{'))).new === 0, 'second run finds 0 new');
-  ok(readFileSync(PIPELINE, 'utf8') === before, 'second run leaves the queue byte-identical');
+    // dry run: reports, writes nothing
+    ok(R[0].code === 2, 'exit code 2 when a source fails (broken + unknown provider)');
+    const summary = json(0);
+    ok(summary.new === 3 && summary.dryRun === true, `dry run reports 3 new (${summary.new})`);
+    ok(rows(R[0].pipeline).length === 0, 'dry run leaves the queue untouched');
+    ok(summary.sources.find((s) => s.id === 'broken').error.includes('HTTP 500'), 'a failing source records its error');
+    ok(summary.sources.find((s) => s.id === 'nobody').error.includes('unknown provider'), 'an unknown provider is reported, not thrown');
+    ok(summary.sources.some((s) => s.id === 'alpha') && !summary.sources.some((s) => s.id === 'off'), 'disabled sources are skipped');
+    ok(summary.sources.find((s) => s.id === 'beta').counts.dupRole === 1, 'cross-source company+role dupe is caught');
 
-  // --source targets one source, even a disabled one; --limit caps writes
-  const callsBefore = calls.a;
-  r = await run(['--source', 'off', '--dry-run', '--json']);
-  ok(calls.a === callsBefore + 1, '--source runs a disabled source on request');
-  writeFileSync(PIPELINE, SKELETON); writeFileSync(HISTORY, '');
-  r = await run(['--source', 'alpha', '--limit', '1', '--dry-run', '--json']);
-  ok(JSON.parse(r.out.split('\n').find((l) => l.startsWith('{'))).new === 1, '--limit caps the new rows');
+    // real run: queue, history, sort, log
+    const queued = rows(R[1].pipeline);
+    ok(queued.length === 3, `3 rows appended (${queued.length})`);
+    ok(queued.every((l) => /\| note: remote-latam:(alpha|beta)/.test(l)), 'rows carry the source note');
+    ok(queued.some((l) => l.includes('posted:')), 'dated rows carry posted:');
+    const hist = R[1].history.trim().split('\n');
+    ok(hist[0].startsWith('url\t') && hist.length === 4, `scan-history has header + 3 rows (${hist.length})`);
+    ok(hist.slice(1).every((l) => l.split('\t')[2].startsWith('remote-latam:')), 'history portal column names the source');
+    const logLines = R[1].log.trim().split('\n');
+    ok(logLines[0] === LOG_HEADER.join('\t'), 'run log has the header');
+    ok(logLines.length > 1 && logLines.every((l) => l.split('\t').length === LOG_HEADER.length), 'every log row has one cell per column');
 
-  // argument errors
-  await rejectsWith(main(['--bogus'], { providers }), /unknown argument/, 'unknown flag is rejected');
-  await rejectsWith(main(['--since', '1', '--since', '2'], { providers }), /more than once/, 'repeated flag is rejected');
-  await rejectsWith(main(['--since', '-1'], { providers }), />= 0/, 'negative --since is rejected');
-  await rejectsWith(main(['--since'], { providers }), /needs a value/, 'flag without value is rejected');
-  await rejectsWith(main(['--catalog', catalogFile, '--source', 'nope'], { providers }), /no source "nope"/, 'unknown --source is reported');
-  const help = await capture(() => main(['--help'], { providers }));
-  ok(help.result === 0 && /--dry-run/.test(help.out), '--help prints usage and exits 0');
+    // second run: everything is now known, queue byte-identical
+    ok(json(2).new === 0, 'second run finds 0 new');
+    ok(R[2].pipeline === R[1].pipeline, 'second run leaves the queue byte-identical');
+
+    // --source targets one source, even a disabled one; --limit caps writes
+    ok(R[3].calls.a === R[2].calls.a + 1, '--source runs a disabled source on request');
+    ok(json(4).new === 1, '--limit caps the new rows');
+
+    // argument errors and help
+    ok(/unknown argument/.test(R[5].error), 'unknown flag is rejected');
+    ok(/more than once/.test(R[6].error), 'repeated flag is rejected');
+    ok(/>= 0/.test(R[7].error), 'negative --since is rejected');
+    ok(/needs a value/.test(R[8].error), 'flag without value is rejected');
+    ok(/no source "nope"/.test(R[9].error), 'unknown --source is reported');
+    ok(R[10].code === 0 && /--dry-run/.test(R[10].out), '--help prints usage and exits 0');
+  } else {
+    fail(`CLI child returned ${R.length} results, expected ${steps.length}`);
+  }
+
+  // The real environment must be untouched by this suite.
+  ok(process.env.CAREER_OPS_PIPELINE === undefined || !String(process.env.CAREER_OPS_PIPELINE).includes('remote-latam-runner-'),
+    'this suite does not leak CAREER_OPS_* paths into the shared test process');
 } catch (e) {
   fail(`remote-latam-runner test crashed: ${e.stack || e.message}`);
 } finally {

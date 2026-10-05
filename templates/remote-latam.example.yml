@@ -22,16 +22,16 @@ filters:
   #   \b(IA|AI|GenAI|LLM)\b|Intelig[eê]ncia Artificial|\bdados\b|\bdata\b|governan|agent )
   include: '\b(AI|IA|ML|LLMs?|GenAI|MLOps|LLMOps|agentic|agents?|machine learning|artificial intelligence|intelig[eê]ncia artificial|prompt|governan\w*|responsible ai)\b|\b(data|dados)\b.*\b(manager|head|director|lead|chief|gerente|gestor|diretor)\b|\b(manager|head|director|lead|chief|gerente|gestor|diretor)\b.*\b(data|dados)\b'
   # `exclude` = the import-config.sh list, plus what the first live dry-run showed
-  # as noise: support/service/sales "agents", data centers, annotation and rating
-  # gigs, entry-level, and generic analyst roles.
-  exclude: 'Analista(?!.*Governan)|\bQA\b|Product Manager|Gerente de Produto|\bSAP\b|\bJR\b|J[uú]nior|Junior|Pleno|\bPL\b|Est[aá]gi|Intern|Instrutor|Diretor\(a\) de Arte|Executivo|Hunter|Engenheir[oa] de Dados|Data Engineer|Cientista|Scientist|Sales|Account|Marketing|Clinical|Designer|Dados Mestres|Master Data|customer (service|support|success)|(support|service|real estate|insurance) agent|data cent(er|re)s?|\bSEO\b|annotat|\brater\b|no experience|entry[- ]level|\b(business|data|content|financial|market) analyst\b'
+  # as noise: support/service/sales "agents", data centers, annotation, rating and
+  # AI-trainer gigs, entry-level, and analyst roles (an "AI Governance Analyst" stays).
+  exclude: 'Analista(?!.*Governan)|\bQA\b|Product Manager|Gerente de Produto|\bSAP\b|\bJR\b|J[uú]nior|Junior|Pleno|\bPL\b|Est[aá]gi|Intern|Instrutor|Diretor\(a\) de Arte|Executivo|Hunter|Engenheir[oa] de Dados|Data Engineer|Cientista|Scientist|Sales|Account|Marketing|Clinical|Designer|Dados Mestres|Master Data|customer (service|support|success)|(support|service|real estate|insurance) agent|data cent(er|re)s?|\bSEO\b|annotat|\brater\b|no experience|entry[- ]level|\bAI trainers?\b|(?<!governance\s)\banalyst\b'
 
   # Region gate (see scripts/lib/latam-eligibility.mjs). A posting whose
   # location/description names one of `accept` is kept; one that names only
   # `reject` is dropped; one that says nothing about region is kept and tagged
   # `loc?` in the pipeline note, never dropped silently.
   latam:
-    accept: [latam, latin america, south america, americas, brazil, brasil, worldwide, anywhere, global]
+    accept: [latam, latin america, south america, americas, brazil, brasil, sao paulo, worldwide, anywhere, global]
     reject: [us only, usa only, united states only, eu only, europe only, uk only, canada only]
 
 sources:
@@ -96,6 +96,27 @@ sources:
     provider: jobspresso
     enabled: false
     notes: curated, low volume
+
+  # -- Found by the phase-2 discovery (docs/REMOTE-LATAM-SOURCES.md) ------------
+  # Out of 639 board domains in the GitHub lists, these were the two with a free,
+  # permitted feed AND vagas that pass the filters above (tested on 2026-10-05).
+  - id: remoteyeah
+    provider: remoteyeah
+    enabled: true
+    notes: RSS with a structured location; carries real Brazil / Latin America roles
+
+  - id: tryremotely
+    provider: tryremotely
+    enabled: true
+    max_pages: 50
+    notes: official public JSON API, no key (100 req/min), no server-side filter and ~1,300 listings/day across every field, so depth is what reaches the window - 50 pages (~13 MB, ~1 min) is ~3.9 days, enough for the default 3-day window. Stops early once a page is older than --since. Attribution is met by construction - every row links to its tryremotely.com listing
+
+  # Provider already in the repo (AI-agent engineering roles), off because the site's
+  # own API answered HTTP 500 on 2026-10-05. Re-test with --source agentic-jobs.
+  - id: agentic-jobs
+    provider: agentic-jobs
+    enabled: false
+    notes: agentic-engineering-jobs.com REST API; HTTP 500 on 2026-10-05
 
   # -- RSS feeds with no provider (not built: open-source boards, low fit) -----
   # fossjobs.net (https://www.fossjobs.net/rss/all/) and opensourcejobhub.com
