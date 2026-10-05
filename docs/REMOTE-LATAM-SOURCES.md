@@ -45,7 +45,8 @@ Validada em 05/10/2026 com `curl` (status, `robots.txt`, feeds declarados na pá
 | Espelhos do thread do HN | hnwork.app, nthesis.ai, dheerajck.github.io/hnwhoishiring, nchelluri.github.io/hnjobs, hnjobs.emilburzo.com | **Cobertas** pelo provider `hackernews` (mesma fonte) |
 | RSS de vagas, sem provider | fossjobs.net (`/rss/all/`), opensourcejobhub.com (`/rss/`) | **Fora por ora**: boards de open source, pouca vaga de IA/dados; viram provider se você quiser |
 | Termos proíbem scraping | remoterocketship.com | **Fora, por decisão de termos.** A seção 5 dos termos proíbe "scraping the Platform, running automated browser sessions" e monitora padrões automatizados. A única via permitida é a API oficial (`POST /api/openclaw/jobs`), que exige assinatura paga. Não é gratuito, então não entra |
-| Sem feed de vagas | aigigjobs.com, remoteleaf.com, remotesource.com, arc.dev | **Fora**. Só HTML ou JSON-LD embutido. O AIGigJobs é legível (10 blocos JSON-LD por página, `robots.txt` permissivo com Crawl-delay de 5 s) mas quase só traz freelance e crowd-work (Mercor, "AI Data Collection Contributor"), sem aderência aos arquétipos |
+| Sem feed de vagas | remoteleaf.com, remotesource.com, arc.dev | **Fora**. Só HTML |
+| JSON-LD embutido | aigigjobs.com | **Usado** (`aigigjobs`), com filtro por classe. A decisão da fase 2 ("só crowd-work") foi revista: 33 de 94 vagas amostradas são engenharia de IA/ML, ciência ou engenharia de dados (ver "Classificação"). `robots.txt` permissivo com Crawl-delay de 5 s; não existe página de termos |
 | Bloqueado ou com login | startup.jobs (403, `robots.txt` restritivo), ziprecruiter.com, indeed.com | **Fora** |
 | Índices do GitHub | awesome-job-boards, remote-job-sites, remote-jobs-list, freehire, backend-br/vagas | **Usados na descoberta** (seção abaixo): 639 domínios sondados, 2 viraram provider |
 | Índices não usados | remote-jobs (maurobonfietti, 1.531 links de empresas), remoteintech, awesome-ai-startups-hiring | **Fora**: listas de empresas, não de boards |
@@ -63,6 +64,7 @@ Entram no catálogo porque já existem, são gratuitos e trazem região:
 | `weworkremotely` | Ativo. RSS, local muitas vezes vazio |
 | `remoteyeah` | Ativo. **Provider novo** (RSS). `<location>` estruturado: traz vagas "Brazil" e "Latin America" |
 | `tryremotely` | Ativo. **Provider novo** (API oficial, sem chave). Ver "Limites" abaixo sobre profundidade |
+| `aigigjobs` | Ativo. **Provider novo** (JSON-LD das páginas públicas). Freelance e contrato de IA e dados; filtra por classe. Ver "Classificação" |
 | `agentic-jobs` | Desligado. Provider existente (vagas de engenharia de agentes), mas a API do site respondeu HTTP 500 em 05/10/2026 |
 | `torre` | **Desligado.** Em 05/10/2026 `search.torre.co` responde HTTP 400 a qualquer corpo, mesmo `{}`. Retestar |
 | `remoteok` | Desligado. Os termos pedem link de volta ao remoteok.com |
@@ -85,6 +87,22 @@ Resultado: **2 boards valem provider**, ambos com termos que permitem a leitura.
 
 Os outros 76 feeds ficaram de fora: blogs de carreira (Collibra, careerday, aiapplyd), boards sem região no feed (tudo viraria `loc?`: jobsbylevel, pyjobs, typescriptjobs) ou centrados em EUA/Europa (aidevboard: 17 de 19 rejeitadas).
 
+## Classificação
+
+Todo posting passa por `lib/job-class.mjs` (puro, sem rede, heurística de título) e a etiqueta vai no `note:` da linha da fila: `remote-latam:<fonte> <engajamento>/<domínio> [pagamento] [loc?]`, por exemplo `remote-latam:aigigjobs freelance/ai-ml-eng $60-150/h`. A etiqueta aparece em **todas** as fontes; só quem declara `classes:` no catálogo filtra por ela.
+
+| Eixo | Valores |
+|---|---|
+| Engajamento | `employee` (FULL_TIME), `contract`, `freelance-gig` (plataforma ou "Freelance"), `crowd-task` (rotulagem, transcrição), `expert-panel` (PhD, advogado, médico), `unknown` (a fonte não informa; **nunca** chutado como emprego) |
+| Domínio (primeiro que casa) | `governance`, `data-ai-mgmt`, `ai-eval`, `ai-ml-eng`, `data-science`, `data-eng`, `data-analytics`, `ai-training-ops`, `software-eng`, `non-tech` |
+| Pagamento | normalizado para US$/hora. Valor "por hora" acima de 1000 é lido como anual (÷ 2080): o AIGigJobs publica "200000 por HORA" para um salário anual. Faixa: `high` ≥ 100, `mid` ≥ 50, `entry` abaixo |
+
+`governance` e `data-ai-mgmt` espelham os arquétipos B e C do perfil; sem eles, "Head of Data & AI" cairia em `non-tech`. `FULL_TIME` numa plataforma é emprego, não gig: o tipo é lido antes da organização.
+
+No catálogo, `classes:` (e opcionalmente `engagements:`) **substitui** o filtro de título daquela fonte: a vaga fica quando o domínio está em `classes` e o engajamento em `engagements`. Valores desconhecidos derrubam a leitura do catálogo com o nome do erro. O funil conta o que sai por aí em `class` (`dropped_class` no log). Na amostra de 05/10/2026 (94 vagas, 12 páginas) o recorte `[ai-ml-eng, ai-eval, data-science, data-eng, data-analytics]` deixa 33; depois do filtro de região sobram **3** (a maioria dos gigs de IA exige residência nos EUA), então espere poucas linhas por rodada. Um gig com cidade dos EUA no lugar de país ("San Francisco, California") passa como `loc?`: o filtro de região só reconhece países.
+
+Limites: título decide, então "AI Task Auditor" e "Competitive Evaluations" ficam na fronteira de `ai-eval`; o catálogo é o botão de ajuste. O pagamento por hora em US$ não é comparável ao salário anual do perfil sem conversão, por isso fica só na nota. Como avaliar uma vaga freelance no `/career-ops pipeline` (conversão hora → ano) é decisão em aberto.
+
 ## Limites conhecidos
 
 - **Volume baixo:** a maioria dos boards publica pouco em IA. Numa rodada de 7 dias, ~10 linhas é o normal.
@@ -103,4 +121,6 @@ Os outros 76 feeds ficaram de fora: blogs de carreira (Collibra, careerday, aiap
 
 ```bash
 node test-all.mjs --only remote-latam      # filtro de região + runner, sem rede
+node test-all.mjs --only job-class         # classificação de dados e IA
+node test-all.mjs --only aigigjobs         # provider do AIGigJobs
 ```

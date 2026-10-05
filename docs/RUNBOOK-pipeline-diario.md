@@ -179,7 +179,7 @@ scripts/run-remote-latam-scan.sh --dry-run     # funil por fonte, não grava
 scripts/run-remote-latam-scan.sh               # grava as novas (janela: JOBAGE, padrão 3)
 ```
 
-Cada linha leva `note: remote-latam:<fonte>`, e `loc?` quando o board não diz a região (confira no pre-screen). O volume é baixo (~10 linhas por rodada de 7 dias é o normal). Detalhes, regras de região e auditoria das fontes: `docs/REMOTE-LATAM-SOURCES.md`. Ainda **não está** no `run-daily-scan.sh`: colocar lá é decisão separada, depois de alguns dias de rodadas manuais.
+Cada linha leva `note: remote-latam:<fonte>`, e `loc?` quando o board não diz a região (confira no pre-screen). O volume é baixo (~10 linhas por rodada de 7 dias é o normal). A nota também traz a classe do trabalho (`freelance/ai-ml-eng $60-150/h`, `employee/governance`...); a fonte `aigigjobs` (freelance de IA e dados, ~1 min por rodada) filtra por classe em vez de título. Detalhes, regras de região e auditoria das fontes: `docs/REMOTE-LATAM-SOURCES.md`. Ainda **não está** no `run-daily-scan.sh`: colocar lá é decisão separada, depois de alguns dias de rodadas manuais.
 
 ## 6. Filtros de freshness (< 3 dias)
 

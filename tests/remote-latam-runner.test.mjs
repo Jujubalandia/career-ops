@@ -22,7 +22,7 @@ const TMP = mkdtempSync(join(tmpdir(), 'remote-latam-runner-'));
 
 try {
   const RUNNER_URL = pathToFileURL(join(ROOT, 'scripts/scan-remote-latam.mjs')).href;
-  const { parseCatalog, titleGate, ageInDays, runFunnel, LOG_HEADER } = await import(RUNNER_URL);
+  const { parseCatalog, titleGate, classGate, ageInDays, runFunnel, LOG_HEADER } = await import(RUNNER_URL);
   const DAY = 86_400_000;
   const NOW = Date.UTC(2026, 9, 5, 12, 0, 0);
 
@@ -105,6 +105,48 @@ try {
   ok(runFunnel(jobs, { sourceId: 'x', filters, sinceDays: 0, snapshot: mk(), now: NOW }).counts.droppedAge === 0, 'sinceDays 0 disables the age gate');
   ok(runFunnel(undefined, { sourceId: 'x', filters, sinceDays: 7, snapshot: mk() }).counts.fetched === 0, 'undefined jobs does not throw');
 
+  // ── class gate and class label ────────────────────────────────────────────────
+  const gigs = [
+    { title: 'Machine Learning Engineer', url: 'https://www.aigig-test.example/jobs/ml', company: 'micro1', location: 'Brazil', postedAt: NOW - DAY, meta: { employmentType: 'CONTRACTOR', pay: { min: 60, max: 150, currency: 'USD', unit: 'HOUR' } } },
+    { title: 'Data Scientist', url: 'https://www.aigig-test.example/jobs/ds', company: 'Alignerr', location: 'Brazil', postedAt: NOW - DAY, meta: { employmentType: 'CONTRACTOR' } },
+    { title: 'Senior ML Engineer', url: 'https://www.aigig-test.example/jobs/emp', company: 'Acme Test Co', location: 'Brazil', postedAt: NOW - DAY, meta: { employmentType: 'FULL_TIME' } },
+    { title: 'Data Labeling Specialist', url: 'https://www.aigig-test.example/jobs/label', company: 'Alignerr', location: 'Brazil', postedAt: NOW - DAY, meta: { employmentType: 'CONTRACTOR' } },
+    { title: 'Bankruptcy Attorney', url: 'https://www.aigig-test.example/jobs/law', company: 'micro1', location: 'Brazil', postedAt: NOW - DAY, meta: { employmentType: 'CONTRACTOR' } },
+    { title: 'Software Engineer - Backend', url: 'https://www.aigig-test.example/jobs/be', company: 'Alignerr', location: 'Brazil', postedAt: NOW - DAY, meta: { employmentType: 'CONTRACTOR' } },
+    { title: 'ML Engineer', url: 'https://www.aigig-test.example/jobs/noeng', company: 'Acme Test Co', location: 'Brazil', postedAt: NOW - DAY },
+    { title: 'Machine Learning Engineer (US only)', url: 'https://www.aigig-test.example/jobs/us', company: 'micro1', location: 'USA Only', postedAt: NOW - DAY, meta: { employmentType: 'CONTRACTOR' } },
+  ];
+  const CLASSES = ['ai-ml-eng', 'data-science', 'data-eng', 'data-analytics', 'ai-eval'];
+  const gated = runFunnel(gigs, { sourceId: 'gig', filters: { include: /NEVERMATCH/, exclude: /ML Engineer/i, latam: { accept: [], reject: [] } }, sinceDays: 7, snapshot: mk(), now: NOW, classes: CLASSES, engagements: ['freelance-gig', 'contract', 'employee'] });
+  ok(gated.counts.new === 3 && gated.offers.map((o) => o.url.split('/').pop()).join() === 'ml,ds,emp',
+    `class gate replaces the title gate (the include/exclude regexes are ignored): ml, ds, emp kept (${gated.offers.map((o) => o.url.split('/').pop())})`);
+  ok(gated.counts.droppedClass === 4 && gated.counts.droppedTitle === 0, `class drops: labelling, attorney, backend, and the unknown engagement (${gated.counts.droppedClass} of 4; title drops ${gated.counts.droppedTitle})`);
+  ok(gated.counts.droppedRegion === 1, 'the region gate still runs after the class gate');
+  ok(gated.offers[0].note === 'remote-latam:gig freelance/ai-ml-eng $60-150/h', `label and pay in the note (${gated.offers[0].note})`);
+  ok(gated.offers[1].note === 'remote-latam:gig freelance/data-science', `label without pay (${gated.offers[1].note})`);
+  ok(gated.offers[2].note === 'remote-latam:gig employee/ai-ml-eng', `FULL_TIME is labelled employee (${gated.offers[2].note})`);
+  const noEng = runFunnel(gigs, { sourceId: 'gig', filters, sinceDays: 7, snapshot: mk(), now: NOW, classes: CLASSES });
+  ok(noEng.offers.some((o) => o.url.endsWith('/noeng')), '`classes` without `engagements` accepts an unknown engagement');
+  ok(classGate({ domain: 'ai-ml-eng', engagement: 'unknown' }, { classes: CLASSES, engagements: ['employee'] }) === 'engagement'
+    && classGate({ domain: 'non-tech', engagement: 'employee' }, { classes: CLASSES }) === 'class'
+    && classGate({ domain: 'data-eng', engagement: 'employee' }, { classes: CLASSES, engagements: ['employee'] }) === null, 'classGate reasons: class, engagement, null');
+
+  // a source with no `classes` keeps the title gate AND still gets a label in the note
+  const plain = runFunnel([job({ url: 'https://acme-test.example/jobs/lbl', title: 'AI Governance Lead' })], { sourceId: 'stub', filters, sinceDays: 7, snapshot: mk(), now: NOW });
+  ok(plain.offers[0]?.note === 'remote-latam:stub governance', `every source gets a class label (${plain.offers[0]?.note})`);
+  const plainLoc = runFunnel([job({ url: 'https://acme-test.example/jobs/lbl2', title: 'AI Engineer', location: '' })], { sourceId: 'stub', filters, sinceDays: 7, snapshot: mk(), now: NOW });
+  ok(plainLoc.offers[0]?.note === 'remote-latam:stub ai-ml-eng loc?', `label comes before loc? (${plainLoc.offers[0]?.note})`);
+  ok(LOG_HEADER[LOG_HEADER.length - 1] === 'dropped_class', 'LOG_HEADER ends with dropped_class (older columns keep their positions)');
+
+  // catalog: classes / engagements
+  const cat = (extra) => `sources:\n  - id: g\n    provider: stub\n${extra}`;
+  ok(JSON.stringify(parseCatalog(cat('    classes: [ai-ml-eng]\n    engagements: [freelance-gig]\n')).sources[0].classes) === '["ai-ml-eng"]', 'catalog accepts classes and engagements');
+  throwsWith(() => parseCatalog(cat('    classes: [ai-engineering]\n')), /unknown classes "ai-engineering"/, 'an unknown class is rejected and named');
+  throwsWith(() => parseCatalog(cat('    classes: [ai-ml-eng]\n    engagements: [gig]\n')), /unknown engagements "gig"/, 'an unknown engagement is rejected and named');
+  throwsWith(() => parseCatalog(cat('    classes: []\n')), /non-empty list/, 'an empty classes list is rejected');
+  throwsWith(() => parseCatalog(cat('    classes: ai-ml-eng\n')), /non-empty list/, 'classes must be a list');
+  throwsWith(() => parseCatalog(cat('    engagements: [employee]\n')), /without `classes`/, 'engagements without classes is rejected');
+
   // ── CLI end to end, in a child process (stub providers, temp queue) ───────────
   const PIPELINE = join(TMP, 'pipeline.md');
   const HISTORY = join(TMP, 'scan-history.tsv');
@@ -145,6 +187,7 @@ const steps = JSON.parse(readFileSync(process.argv[2], 'utf8'));
 const results = [];
 for (const step of steps) {
   if (step.reset) { writeFileSync(PIPELINE, SKELETON); writeFileSync(HISTORY, ''); }
+  if (step.preLog !== undefined) writeFileSync(LOG, step.preLog);
   const real = console.log;
   const lines = [];
   console.log = (...a) => lines.push(a.join(' '));
@@ -167,6 +210,7 @@ process.stdout.write(JSON.stringify(results));
     { argv: ['--since'] },                                                     // 8
     { argv: withCatalog(['--source', 'nope']) },                               // 9
     { argv: ['--help'] },                                                      // 10
+    { preLog: 'timestamp\tsource\tnew\n2026-01-01T00:00:00Z\told\t1\n', argv: withCatalog(['--source', 'alpha', '--dry-run', '--json']) }, // 11 log written by an older version
   ];
   const specFile = join(TMP, 'steps.json');
   writeFileSync(specFile, JSON.stringify(steps));
@@ -219,6 +263,11 @@ process.stdout.write(JSON.stringify(results));
     ok(/needs a value/.test(R[8].error), 'flag without value is rejected');
     ok(/no source "nope"/.test(R[9].error), 'unknown --source is reported');
     ok(R[10].code === 0 && /--dry-run/.test(R[10].out), '--help prints usage and exits 0');
+
+    // a log written under an older header gets a fresh header before the new rows
+    const old = R[11].log.trim().split('\n');
+    ok(old[0].startsWith('timestamp\tsource\tnew') && old[1].startsWith('2026-01-01') && old[2] === LOG_HEADER.join('\t') && old[3].split('\t').length === LOG_HEADER.length,
+      'a log with a different header keeps its old rows and gets the new header before the new ones');
   } else {
     fail(`CLI child returned ${R.length} results, expected ${steps.length}`);
   }

@@ -8,6 +8,10 @@
  *
  *   fetched -> title gate -> region gate -> age gate -> dedup -> [liveness] -> new
  *
+ * A source with `classes:` (and optionally `engagements:`) in the catalog swaps the title
+ * gate for a class gate (lib/job-class.mjs): the domain/engagement of the posting decides.
+ * Every queued row, from every source, carries its class label in the note.
+ *
  * It is a source for the queue, not an evaluator: it writes `- [ ] url | ...` rows
  * and nothing else. Run `/career-ops pipeline` yourself to evaluate them.
  *
@@ -36,6 +40,7 @@ import { loadProviders } from '../providers/_registry.mjs';
 import { makeHttpCtx } from '../providers/_http.mjs';
 import { getCareerOpsRoot } from '../path-resolver.mjs';
 import { classifyLatam } from '../lib/latam-eligibility.mjs';
+import { classifyJob, DOMAINS, ENGAGEMENTS } from '../lib/job-class.mjs';
 import { isMainModule } from '../lib/is-main-module.mjs';
 import { localToday } from '../lib/local-today.mjs';
 
@@ -47,7 +52,7 @@ const DAY_MS = 86_400_000;
 const PAUSE_BETWEEN_SOURCES_MS = 500;
 
 export const LOG_HEADER = ['timestamp', 'source', 'since_days', 'fetched', 'invalid', 'dropped_title',
-  'dropped_region', 'dropped_age', 'undated', 'loc_unknown', 'dup_url', 'dup_role', 'new', 'error', 'dry_run'];
+  'dropped_region', 'dropped_age', 'undated', 'loc_unknown', 'dup_url', 'dup_role', 'new', 'error', 'dry_run', 'dropped_class'];
 
 // ── catalog ─────────────────────────────────────────────────────────────────────
 
@@ -69,6 +74,13 @@ export function parseCatalog(text) {
     if (typeof s.provider !== 'string' || !s.provider.trim()) throw new Error(`catalog: source "${s.id}" has no \`provider\``);
     if (ids.has(s.id)) throw new Error(`catalog: duplicate source id "${s.id}"`);
     ids.add(s.id);
+    for (const [key, allowed] of [['classes', DOMAINS], ['engagements', ENGAGEMENTS]]) {
+      if (s[key] === undefined) continue;
+      if (!Array.isArray(s[key]) || s[key].length === 0) throw new Error(`catalog: source "${s.id}" \`${key}\` must be a non-empty list`);
+      const bad = s[key].filter((v) => !allowed.includes(v));
+      if (bad.length) throw new Error(`catalog: source "${s.id}" has unknown ${key} ${bad.map((v) => JSON.stringify(v)).join(', ')} (allowed: ${allowed.join(', ')})`);
+    }
+    if (s.engagements && !s.classes) throw new Error(`catalog: source "${s.id}" sets \`engagements\` without \`classes\``);
     return { ...s, enabled: s.enabled !== false };
   });
   const f = doc.filters ?? {};
@@ -99,6 +111,13 @@ export function titleGate(title, { include, exclude }) {
   return null;
 }
 
+/** Class gate: the reason a classified posting is dropped, or null when it stays. */
+export function classGate(cls, { classes, engagements }) {
+  if (!classes.includes(cls.domain)) return 'class';
+  if (engagements && !engagements.includes(cls.engagement)) return 'engagement';
+  return null;
+}
+
 /** Whole days since postedAt (epoch ms), or null when undated. */
 export function ageInDays(postedAt, now = Date.now()) {
   if (typeof postedAt !== 'number' || !Number.isFinite(postedAt) || postedAt <= 0) return null;
@@ -106,7 +125,7 @@ export function ageInDays(postedAt, now = Date.now()) {
 }
 
 const emptyCounts = () => ({
-  fetched: 0, invalid: 0, droppedTitle: 0, droppedRegion: 0, droppedAge: 0,
+  fetched: 0, invalid: 0, droppedTitle: 0, droppedClass: 0, droppedRegion: 0, droppedAge: 0,
   undated: 0, locUnknown: 0, dupUrl: 0, dupRole: 0, new: 0,
 });
 
@@ -114,7 +133,7 @@ const emptyCounts = () => ({
  * Narrow one source's postings. `snapshot` ({seen, seenCompanyRoles}) is MUTATED as
  * rows are accepted, so two sources (or two postings) cannot both queue the same job.
  */
-export function runFunnel(jobs, { sourceId, filters, sinceDays, snapshot, now = Date.now() }) {
+export function runFunnel(jobs, { sourceId, filters, sinceDays, snapshot, now = Date.now(), classes, engagements }) {
   const counts = emptyCounts();
   const offers = [];
   for (const job of jobs ?? []) {
@@ -123,7 +142,10 @@ export function runFunnel(jobs, { sourceId, filters, sinceDays, snapshot, now = 
     const title = typeof job?.title === 'string' ? job.title.trim() : '';
     if (!/^https?:\/\//i.test(url) || !title) { counts.invalid++; continue; }
 
-    if (titleGate(title, filters)) { counts.droppedTitle++; continue; }
+    const cls = classifyJob({ title, org: job.company, employmentType: job.meta?.employmentType, pay: job.meta?.pay });
+    if (classes) {
+      if (classGate(cls, { classes, engagements })) { counts.droppedClass++; continue; }
+    } else if (titleGate(title, filters)) { counts.droppedTitle++; continue; }
 
     const region = classifyLatam(
       { location: job.location, title, description: job.description },
@@ -152,7 +174,7 @@ export function runFunnel(jobs, { sourceId, filters, sinceDays, snapshot, now = 
       title,
       location: typeof job.location === 'string' ? job.location.trim() : '',
       postedAt: typeof job.postedAt === 'number' ? job.postedAt : undefined,
-      note: `remote-latam:${sourceId}${unknown ? ' loc?' : ''}`,
+      note: `remote-latam:${sourceId} ${cls.label}${unknown ? ' loc?' : ''}`,
       source: `remote-latam:${sourceId}`,
     });
   }
@@ -202,7 +224,11 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 function writeLog(rows) {
   mkdirSync(path.dirname(LOG_PATH), { recursive: true });
-  if (!existsSync(LOG_PATH)) appendFileSync(LOG_PATH, LOG_HEADER.join('\t') + '\n');
+  // A new column changes the header: write a fresh one before the new rows instead of
+  // leaving old-width rows under a header that no longer describes them.
+  const header = LOG_HEADER.join('\t');
+  const current = existsSync(LOG_PATH) ? readFileSync(LOG_PATH, 'utf8').split('\n').filter(Boolean).filter((l) => l.startsWith('timestamp\t')).pop() : undefined;
+  if (current !== header) appendFileSync(LOG_PATH, header + '\n');
   appendFileSync(LOG_PATH, rows.map((r) => r.join('\t')).join('\n') + '\n');
 }
 
@@ -244,7 +270,7 @@ export async function main(argv = process.argv.slice(2), deps = {}) {
     }
     try {
       const jobs = await provider.fetch({ ...src, name: src.id }, ctx);
-      const { offers, counts } = runFunnel(jobs, { sourceId: src.id, filters: catalog.filters, sinceDays, snapshot, now });
+      const { offers, counts } = runFunnel(jobs, { sourceId: src.id, filters: catalog.filters, sinceDays, snapshot, now, classes: src.classes, engagements: src.engagements });
       all.push(...offers);
       perSource.push({ id: src.id, counts, error: '' });
     } catch (err) {
@@ -261,9 +287,9 @@ export async function main(argv = process.argv.slice(2), deps = {}) {
     console.log(JSON.stringify({ since: sinceDays, dryRun: args.dryRun, sources: perSource, new: fresh.length, expired: expired.length }));
   } else {
     console.log(`\nremote-latam  since ${sinceDays}d  ${args.dryRun ? '(dry run)' : ''}\n`);
-    console.log(`${'source'.padEnd(16)} ${pad('fetch', 5)} ${pad('title', 5)} ${pad('region', 6)} ${pad('age', 4)} ${pad('dupe', 4)} ${pad('loc?', 4)} ${pad('NEW', 4)}`);
+    console.log(`${'source'.padEnd(16)} ${pad('fetch', 5)} ${pad('title', 5)} ${pad('class', 5)} ${pad('region', 6)} ${pad('age', 4)} ${pad('dupe', 4)} ${pad('loc?', 4)} ${pad('NEW', 4)}`);
     for (const { id, counts: c, error } of perSource) {
-      console.log(`${id.padEnd(16)} ${pad(c.fetched, 5)} ${pad(`-${c.droppedTitle}`, 5)} ${pad(`-${c.droppedRegion}`, 6)} ${pad(`-${c.droppedAge}`, 4)} ${pad(`-${c.dupUrl + c.dupRole}`, 4)} ${pad(c.locUnknown, 4)} ${pad(c.new, 4)}${error ? `  ⚠️ ${error}` : ''}`);
+      console.log(`${id.padEnd(16)} ${pad(c.fetched, 5)} ${pad(`-${c.droppedTitle}`, 5)} ${pad(`-${c.droppedClass}`, 5)} ${pad(`-${c.droppedRegion}`, 6)} ${pad(`-${c.droppedAge}`, 4)} ${pad(`-${c.dupUrl + c.dupRole}`, 4)} ${pad(c.locUnknown, 4)} ${pad(c.new, 4)}${error ? `  ⚠️ ${error}` : ''}`);
     }
     if (args.verify) console.log(`\nliveness: -${expired.length} dead`);
     console.log(`\n${fresh.length} new row(s)${args.limit !== undefined && all.length > fresh.length ? ` (capped from ${all.length})` : ''}`);
@@ -272,7 +298,7 @@ export async function main(argv = process.argv.slice(2), deps = {}) {
 
   const ts = new Date().toISOString();
   writeLog(perSource.map(({ id, counts: c, error }) => [ts, id, sinceDays, c.fetched, c.invalid, c.droppedTitle,
-    c.droppedRegion, c.droppedAge, c.undated, c.locUnknown, c.dupUrl, c.dupRole, c.new, error ? error.replace(/\s+/g, ' ') : '', args.dryRun ? 1 : 0]));
+    c.droppedRegion, c.droppedAge, c.undated, c.locUnknown, c.dupUrl, c.dupRole, c.new, error ? error.replace(/\s+/g, ' ') : '', args.dryRun ? 1 : 0, c.droppedClass]));
 
   if (args.dryRun) { if (!args.json) console.log('\n(dry run — nothing written to data/pipeline.md)'); }
   else if (fresh.length > 0) {

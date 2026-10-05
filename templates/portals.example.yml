@@ -1603,6 +1603,11 @@ search_queries:
 #   max_pages: 20                         # optional — 100 postings/page (default 20 ≈ 1.5 days, cap 50 ≈ 3.9 days)
 #   enabled: true                         # attribution required: rows link to the tryremotely.com listing
 #
+# - name: AIGigJobs                      # freelance/contract AI + data gigs; JSON-LD on public listing pages
+#   provider: aigigjobs                   # catalog use (scripts/scan-remote-latam.mjs), see remote-latam.example.yml
+#   pages: [locations/brazil, skills/python]   # optional; default 12 pages, cap 20; 5 s between pages (robots.txt Crawl-delay)
+#   enabled: true                         # rows carry meta.employmentType/pay for lib/job-class.mjs
+#
 # - name: Get on Board
 #   provider: getonbrd
 #   enabled: true

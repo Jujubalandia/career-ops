@@ -111,6 +111,25 @@ sources:
     max_pages: 50
     notes: official public JSON API, no key (100 req/min), no server-side filter and ~1,300 listings/day across every field, so depth is what reaches the window - 50 pages (~13 MB, ~1 min) is ~3.9 days, enough for the default 3-day window. Stops early once a page is older than --since. Attribution is met by construction - every row links to its tryremotely.com listing
 
+  # Freelance / contract AI and data gigs (Mercor, micro1, Alignerr, Meridial, Appen...).
+  # It mixes real engineering with labelling and expert panels, so this source uses a
+  # CLASS gate (lib/job-class.mjs) in place of the title regex above: a posting stays only
+  # when its domain is in `classes` and its engagement in `engagements`. Domains:
+  # governance, data-ai-mgmt, ai-eval, ai-ml-eng, data-science, data-eng, data-analytics,
+  # ai-training-ops, software-eng, non-tech. Engagements: employee, contract, freelance-gig,
+  # crowd-task, expert-panel, unknown. Every row, from every source, carries its label in
+  # the note (e.g. `freelance/ai-ml-eng $60-150/h`).
+  - id: aigigjobs
+    provider: aigigjobs
+    enabled: true
+    classes: [ai-ml-eng, ai-eval, data-science, data-eng, data-analytics]
+    engagements: [freelance-gig, contract, employee]
+    # Each listing page holds 10 postings; breadth comes from this list. robots.txt sets
+    # Crawl-delay 5, so 12 pages take ~1 min. Allowed sections: locations, skills,
+    # verticals, job-types, platforms (e.g. platforms/mercor).
+    pages: [locations/brazil, locations/latin-america, locations/worldwide, locations/mexico, skills/machine-learning, skills/data-analysis, skills/python, skills/nlp, skills/ai-safety, skills/software-engineering, verticals/engineering, verticals/data-analytics]
+    notes: JSON-LD on public listing pages, no API. No terms page exists (404); robots.txt allows it with a 5 s crawl delay. Rows link to the posting on aigigjobs.com, not the platform's apply page. Pay is hourly in the note only (never in salary), and an annual figure marked HOUR is read as annual.
+
   # Provider already in the repo (AI-agent engineering roles), off because the site's
   # own API answered HTTP 500 on 2026-10-05. Re-test with --source agentic-jobs.
   - id: agentic-jobs
@@ -125,7 +144,7 @@ sources:
   # list it here. See docs/REMOTE-LATAM-SOURCES.md.
 
 # -- Left out on purpose (audit: docs/REMOTE-LATAM-SOURCES.md) -----------------
-# remoterocketship.com, aigigjobs.com, remoteleaf.com, remotesource.com, arc.dev
-#   -> no job feed, HTML/JSON-LD only. Phase 2 if HTML sources are accepted.
+# remoterocketship.com -> terms forbid scraping (paid API only).
+# remoteleaf.com, remotesource.com, arc.dev -> no job feed, HTML only.
 # startup.jobs -> 403 and a restrictive robots.txt.
 # ziprecruiter.com, indeed.com -> login / anti-bot / terms.
