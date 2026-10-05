@@ -1,0 +1,110 @@
+# Remote-LATAM source catalog — template.
+#
+# Copy to ./remote-latam.yml (user layer, gitignored) and edit. Read by
+# scripts/scan-remote-latam.mjs. Every source is a free, public, no-auth board
+# with a feed or API: no HTML scraping, no login. Why each source from
+# docs/rn-PORTALS.txt is in or out is audited in docs/REMOTE-LATAM-SOURCES.md.
+#
+# `provider:` is the id of a module in providers/. Provider-specific fields sit
+# directly on the entry (same shape as a portals.yml `job_boards:` entry, so a
+# stanza can be copied between the two files).
+
+filters:
+  # Title gate (case-insensitive JS regex). A posting is kept when `include`
+  # matches and `exclude` does not.
+  #
+  # `include` is stricter than scripts/import-config.sh on purpose. That one was
+  # tuned for Brazilian boards, where a bare "dados" or "agent" is a good signal;
+  # on international boards the same words pull in "Customer Service Agent",
+  # "Data Centers (Texas)" and "SEO & AI Search Manager". Here a title needs an
+  # AI/ML/agent/governance term, or "data" next to a leadership word.
+  # (The broad import-config.sh include was:
+  #   \b(IA|AI|GenAI|LLM)\b|Intelig[eê]ncia Artificial|\bdados\b|\bdata\b|governan|agent )
+  include: '\b(AI|IA|ML|LLMs?|GenAI|MLOps|LLMOps|agentic|agents?|machine learning|artificial intelligence|intelig[eê]ncia artificial|prompt|governan\w*|responsible ai)\b|\b(data|dados)\b.*\b(manager|head|director|lead|chief|gerente|gestor|diretor)\b|\b(manager|head|director|lead|chief|gerente|gestor|diretor)\b.*\b(data|dados)\b'
+  # `exclude` = the import-config.sh list, plus what the first live dry-run showed
+  # as noise: support/service/sales "agents", data centers, annotation and rating
+  # gigs, entry-level, and generic analyst roles.
+  exclude: 'Analista(?!.*Governan)|\bQA\b|Product Manager|Gerente de Produto|\bSAP\b|\bJR\b|J[uú]nior|Junior|Pleno|\bPL\b|Est[aá]gi|Intern|Instrutor|Diretor\(a\) de Arte|Executivo|Hunter|Engenheir[oa] de Dados|Data Engineer|Cientista|Scientist|Sales|Account|Marketing|Clinical|Designer|Dados Mestres|Master Data|customer (service|support|success)|(support|service|real estate|insurance) agent|data cent(er|re)s?|\bSEO\b|annotat|\brater\b|no experience|entry[- ]level|\b(business|data|content|financial|market) analyst\b'
+
+  # Region gate (see scripts/lib/latam-eligibility.mjs). A posting whose
+  # location/description names one of `accept` is kept; one that names only
+  # `reject` is dropped; one that says nothing about region is kept and tagged
+  # `loc?` in the pipeline note, never dropped silently.
+  latam:
+    accept: [latam, latin america, south america, americas, brazil, brasil, worldwide, anywhere, global]
+    reject: [us only, usa only, united states only, eu only, europe only, uk only, canada only]
+
+sources:
+  # -- Boards listed in docs/rn-PORTALS.txt that already have a provider ------------
+  - id: remotive
+    provider: remotive
+    enabled: true
+    notes: JSON feed; location = candidate_required_location
+
+  - id: workingnomads
+    provider: workingnomads
+    enabled: true
+    notes: JSON feed
+
+  - id: nodesk
+    provider: nodesk
+    enabled: true
+    notes: RSS; the feed carries no location, so every row is tagged loc?
+
+  - id: hackernews
+    provider: hackernews
+    enabled: true
+    notes: current "Ask HN - Who is hiring?" thread; covers the hnwork / nthesis / hnjobs mirrors
+
+  # -- Free boards not in docs/rn-PORTALS.txt, with a provider and LATAM signal -----
+  - id: getonbrd
+    provider: getonbrd
+    enabled: true
+    categories: [machine-learning-ai, programming, operations-management]
+    max_pages: 3
+    notes: LATAM-native board
+
+  - id: torre
+    provider: torre
+    enabled: false
+    search: ai engineer
+    experience: 5-plus-years
+    remote_only: true
+    notes: pan-LATAM marketplace, capped at 20 rows per query. OFF - on 2026-10-05 search.torre.co answers HTTP 400 "Invalid request" to every body, even {}. Re-test and turn on if it recovers.
+
+  - id: himalayas
+    provider: himalayas
+    enabled: true
+    notes: location = locationRestrictions, useful to separate worldwide from region-locked
+
+  - id: jobicy
+    provider: jobicy
+    enabled: true
+    notes: location = jobGeo
+
+  - id: remoteok
+    provider: remoteok
+    enabled: false
+    notes: terms ask for a link back to remoteok.com; keep off unless you accept that
+
+  - id: weworkremotely
+    provider: weworkremotely
+    enabled: true
+    notes: RSS; location is often empty
+
+  - id: jobspresso
+    provider: jobspresso
+    enabled: false
+    notes: curated, low volume
+
+  # -- RSS feeds with no provider (not built: open-source boards, low fit) -----
+  # fossjobs.net (https://www.fossjobs.net/rss/all/) and opensourcejobhub.com
+  # (https://opensourcejobhub.com/rss/) both publish a public RSS feed. To add one:
+  # write providers/<id>.mjs (model: providers/weworkremotely.mjs) and a test, then
+  # list it here. See docs/REMOTE-LATAM-SOURCES.md.
+
+# -- Left out on purpose (audit: docs/REMOTE-LATAM-SOURCES.md) -----------------
+# remoterocketship.com, aigigjobs.com, remoteleaf.com, remotesource.com, arc.dev
+#   -> no job feed, HTML/JSON-LD only. Phase 2 if HTML sources are accepted.
+# startup.jobs -> 403 and a restrictive robots.txt.
+# ziprecruiter.com, indeed.com -> login / anti-bot / terms.

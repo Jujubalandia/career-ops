@@ -61,6 +61,7 @@ config/profile.yml
 config/cv-facts.json
 config/benchmarks.yml
 portals.yml
+remote-latam.yml
 modes/_profile.md
 modes/_custom.md
 modes/_brief.md
