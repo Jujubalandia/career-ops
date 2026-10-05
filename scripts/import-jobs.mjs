@@ -251,7 +251,7 @@ export const isDead = ({ verdict, reason }) =>
   verdict === 'expired' || (verdict === 'uncertain' && /no visible apply control/i.test(reason));
 
 /** Drop dead postings before writing. Fail-open: no verdicts at all (Chromium missing) drops nothing. */
-function dropExpired(offers) {
+export function dropExpired(offers) {
   if (offers.length === 0) return { kept: offers, expired: [] };
   const dir = mkdtempSync(path.join(tmpdir(), 'import-jobs-'));
   try {
