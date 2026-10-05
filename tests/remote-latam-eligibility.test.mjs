@@ -89,6 +89,19 @@ try {
   check('"LATAM" still wins next to other regions',
     { location: 'Northern America, LATAM, Europe, APAC' }, true);
 
+  // Found by the live run of the RemoteYeah / TryRemotely providers: structured
+  // location fields name a country the short place list did not know.
+  for (const country of ['Egypt', 'China', 'Nigeria', 'Vietnam', 'Japan', 'Poland', 'Türkiye', 'Egypt, China']) {
+    check(`any country is a restriction: "${country}"`, { location: country }, false);
+  }
+  check('Brazil next to another country is still eligible', { location: 'Brazil, Egypt' }, true);
+  check('"Toronto (Hybrid)" decides on its own, even if the text says remote',
+    { location: 'Toronto (Hybrid)', title: 'TPM, AI Programs', description: 'You can work remotely some days.' }, false);
+  check('"Berlin, Germany (On-site)"', { location: 'Berlin, Germany (On-site)' }, false);
+  check('"São Paulo (Hybrid)" stays eligible (a target of the profile)', { location: 'São Paulo (Hybrid)' }, true);
+  check('a plain "Remote" location is not an on-site tag',
+    { location: 'Remote', title: 'AI Engineer' }, 'unknown');
+
   // Robustness and config.
   check('null fields do not throw', { location: null, title: undefined, description: null }, 'unknown');
   check('no argument does not throw', undefined, 'unknown');
