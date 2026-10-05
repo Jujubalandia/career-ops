@@ -58,6 +58,7 @@ Três fontes de vagas alimentam uma fila única, com dois ritmos de automação:
 | Scan Gupy (`--jobage 3`) | Diário, 07:00 (**ver aviso no topo**) | 0 token | Cron |
 | `node scan.mjs --verify --since 3` | Junto com o scan diário | 0 token | Cron (mesmo script) |
 | Scan LinkedIn / Vagas.com | 2-3x/semana | 0 token | Manual |
+| Scan remoto LATAM (seção 5b) | Diário ou 2-3x/semana, enquanto não estiver no cron | 0 token | Manual |
 | Pass `--fresh-only` (< 2 dias) | Diário, rápido | Token (menor) | Manual (sem agendamento) |
 | `/career-ops pipeline` (backlog) | 2-3x/semana, ou ao acumular 15-25 vagas novas | Token | Manual |
 | Avaliação por recorte (seção 7b) | Sob demanda, quando o backlog geral é grande demais para rodar de uma vez | Token | Manual |
@@ -168,6 +169,17 @@ custo de dobrar as requisições àquela fonte. Nunca torne isso o padrão autom
 isso de propósito (ver "Regra de ouro" e o aviso de ToS acima).
 
 ---
+
+## 5b. Fontes remotas LATAM (manual, sem cron ainda)
+
+Boards remotos gratuitos com feed ou API (Remotive, Get on Board, Hacker News "Who is hiring?", Working Nomads, Himalayas, Jobicy, We Work Remotely, NoDesk) alimentam a mesma fila, sem passar pelo Gupy nem pelo `scan.mjs`. Catálogo em `remote-latam.yml` (copie de `templates/remote-latam.example.yml`).
+
+```bash
+scripts/run-remote-latam-scan.sh --dry-run     # funil por fonte, não grava
+scripts/run-remote-latam-scan.sh               # grava as novas (janela: JOBAGE, padrão 3)
+```
+
+Cada linha leva `note: remote-latam:<fonte>`, e `loc?` quando o board não diz a região (confira no pre-screen). O volume é baixo (~10 linhas por rodada de 7 dias é o normal). Detalhes, regras de região e auditoria das fontes: `docs/REMOTE-LATAM-SOURCES.md`. Ainda **não está** no `run-daily-scan.sh`: colocar lá é decisão separada, depois de alguns dias de rodadas manuais.
 
 ## 6. Filtros de freshness (< 3 dias)
 
@@ -435,6 +447,9 @@ decidir isso de propósito.
 ```
 scripts/run-daily-scan.sh     cron: Gupy → scan.mjs → ordena
 scripts/run-manual-scan.sh    LinkedIn + Vagas.com (manual)
+scripts/run-remote-latam-scan.sh  boards remotos LATAM → fila (manual, seção 5b)
+scripts/scan-remote-latam.mjs funil dos boards remotos (catálogo remote-latam.yml)
+lib/latam-eligibility.mjs     filtro de região (LATAM / Brasil / worldwide)
 scripts/import-jobs.mjs       import + filtros + ordenação da fila
 scripts/import-config.sh      queries, filtros, JOBAGE, PATH do cron
 scripts/fresh-pending.mjs     seleção das vagas frescas
