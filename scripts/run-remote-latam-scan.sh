@@ -3,8 +3,8 @@
 # it only fills the queue and never runs /career-ops pipeline. Catalog: remote-latam.yml
 # (copy templates/remote-latam.example.yml); audit of each source: docs/REMOTE-LATAM-SOURCES.md.
 #
-# Standalone on purpose: it does not call the Gupy import or scan.mjs, and it is NOT in cron.
-# Wire it into run-daily-scan.sh (or crontab) once you trust the funnel.
+# Standalone on purpose: it does not call the Gupy import or scan.mjs. Cron runs it at 07:20
+# (own crontab line, log logs/remote-latam-cron.log; see docs/RUNBOOK-pipeline-diario.md section 4).
 #
 #   scripts/run-remote-latam-scan.sh --dry-run         # funnel per source, nothing written
 #   scripts/run-remote-latam-scan.sh                    # write new rows (window: $JOBAGE, default 3)

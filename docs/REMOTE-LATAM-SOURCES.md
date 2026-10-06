@@ -13,7 +13,7 @@ scripts/run-remote-latam-scan.sh --source getonbrd        # uma fonte (mesmo des
 scripts/run-remote-latam-scan.sh --verify --limit 20      # derruba links mortos, no máximo 20 linhas
 ```
 
-Sem `remote-latam.yml`, o scanner usa o template (avisa no stderr). O wrapper **não está no cron**: rode à mão até confiar no funil.
+Sem `remote-latam.yml`, o scanner usa o template (avisa no stderr). O wrapper roda no cron às 07:20 (runbook, seção 4); à mão, os comandos acima servem para dias perdidos.
 
 O funil, em ordem (`node scripts/scan-remote-latam.mjs --dry-run` mostra uma linha por fonte):
 

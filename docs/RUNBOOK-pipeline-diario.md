@@ -1,6 +1,6 @@
 # Runbook: pipeline de busca de vagas (career-ops)
 
-Atualizado em 02/10/2026 · mantido pelo dono do fork
+Atualizado em 05/10/2026 · mantido pelo dono do fork
 
 Rotina do dia a dia para achar, avaliar e aplicar em vagas. Onde algo **ainda não foi testado
 ao vivo**, está marcado (seção 11 tem o status de cada item).
@@ -58,7 +58,7 @@ Três fontes de vagas alimentam uma fila única, com dois ritmos de automação:
 | Scan Gupy (`--jobage 3`) | Diário, 07:00 (**ver aviso no topo**) | 0 token | Cron |
 | `node scan.mjs --verify --since 3` | Junto com o scan diário | 0 token | Cron (mesmo script) |
 | Scan LinkedIn / Vagas.com | 2-3x/semana | 0 token | Manual |
-| Scan remoto LATAM (seção 5b) | Diário ou 2-3x/semana, enquanto não estiver no cron | 0 token | Manual |
+| Scan remoto LATAM (seção 5b) | Diário, 07:20 | 0 token | Cron (linha própria) |
 | Pass `--fresh-only` (< 2 dias) | Diário, rápido | Token (menor) | Manual (sem agendamento) |
 | `/career-ops pipeline` (backlog) | 2-3x/semana, ou ao acumular 15-25 vagas novas | Token | Manual |
 | Avaliação por recorte (seção 7b) | Sob demanda, quando o backlog geral é grande demais para rodar de uma vez | Token | Manual |
@@ -78,9 +78,13 @@ Neste WSL2 o daemon do cron não sobe sozinho. Os comandos assumem o repo em `~/
   (crontab -l 2>/dev/null; echo '0 7 * * * $HOME/career-ops/scripts/run-daily-scan.sh >> $HOME/career-ops/logs/daily-scan.log 2>&1') | crontab -
   crontab -l && service cron status
   ```
-- [ ] **Persistir entre boots:** em `/etc/wsl.conf`, `[boot] command` (hoje `ntpdate pool.ntp.org`)
-  precisa incluir `service cron start`; depois `wsl --shutdown` no PowerShell. **Não feito ainda** —
-  se o WSL reiniciar, o daemon para e a linha não volta sozinha.
+- [x] **Linha das 07:20 (remote LATAM):** instalada em 05/10, log próprio `logs/remote-latam-cron.log`,
+  `flock` próprio. Sem `--verify` por enquanto; ligue depois de ~1 semana de logs limpos.
+  ```bash
+  (crontab -l; echo '20 7 * * * $HOME/career-ops/scripts/run-remote-latam-scan.sh >> $HOME/career-ops/logs/remote-latam-cron.log 2>&1') | crontab -
+  ```
+- [x] **Persistir entre boots:** `/etc/wsl.conf` já tem `[boot] command = "ntpdate pool.ntp.org; service cron start"`
+  (conferido em 05/10). Mudar exige `sudo` e `wsl --shutdown` no PowerShell.
 - [x] **Chromium do Playwright** (o `--verify` precisa): já instalado em `~/.cache/ms-playwright`.
 - [x] **Teste sem gravar** (~1,5 min, ambiente mínimo como o do cron):
   ```bash
@@ -95,7 +99,7 @@ Rode isto pela manhã, depois das 07:00, para confirmar (não confie de memória
 ler a data errada de uma linha de log e achar que tinha rodado quando não tinha):
 
 ```bash
-grep '=== ' logs/daily-scan.log | tail -6      # toda "start"/"done" registrada, com timestamp
+grep '=== ' logs/daily-scan.log logs/remote-latam-cron.log | tail -6      # toda "start"/"done" registrada, com timestamp
 crontab -l                                      # a linha ainda está lá?
 service cron status                             # o daemon ainda está de pé?
 ```
@@ -170,7 +174,7 @@ isso de propósito (ver "Regra de ouro" e o aviso de ToS acima).
 
 ---
 
-## 5b. Fontes remotas LATAM (manual, sem cron ainda)
+## 5b. Fontes remotas LATAM (cron 07:20 + manual)
 
 Boards remotos gratuitos com feed ou API (Remotive, Get on Board, Hacker News "Who is hiring?", Working Nomads, Himalayas, Jobicy, We Work Remotely, NoDesk) alimentam a mesma fila, sem passar pelo Gupy nem pelo `scan.mjs`. Catálogo em `remote-latam.yml` (copie de `templates/remote-latam.example.yml`).
 
@@ -179,7 +183,7 @@ scripts/run-remote-latam-scan.sh --dry-run     # funil por fonte, não grava
 scripts/run-remote-latam-scan.sh               # grava as novas (janela: JOBAGE, padrão 3)
 ```
 
-Cada linha leva `note: remote-latam:<fonte>`, e `loc?` quando o board não diz a região (confira no pre-screen). O volume é baixo (~10 linhas por rodada de 7 dias é o normal). A nota também traz a classe do trabalho (`freelance/ai-ml-eng $60-150/h`, `employee/governance`...); a fonte `aigigjobs` (freelance de IA e dados, ~1 min por rodada) filtra por classe em vez de título. Detalhes, regras de região e auditoria das fontes: `docs/REMOTE-LATAM-SOURCES.md`. Ainda **não está** no `run-daily-scan.sh`: colocar lá é decisão separada, depois de alguns dias de rodadas manuais.
+Cada linha leva `note: remote-latam:<fonte>`, e `loc?` quando o board não diz a região (confira no pre-screen). O volume é baixo (~10 linhas por rodada de 7 dias é o normal). A nota também traz a classe do trabalho (`freelance/ai-ml-eng $60-150/h`, `employee/governance`...); a fonte `aigigjobs` (freelance de IA e dados, ~1 min por rodada) filtra por classe em vez de título. Detalhes, regras de região e auditoria das fontes: `docs/REMOTE-LATAM-SOURCES.md`. Roda no cron às 07:20 (linha própria, seção 4), **não** dentro do `run-daily-scan.sh`: lock e log separados. Os comandos acima servem para rodar à mão (cenários B e C da seção 13).
 
 ## 6. Filtros de freshness (< 3 dias)
 
@@ -296,7 +300,7 @@ Os três são disparados por **gatilho**, não por agenda fixa.
 ## 9. Checklist operacional
 
 **Diário**
-- [ ] Confirmar que o cron rodou de verdade: `grep '=== ' logs/daily-scan.log | tail -4` (ver
+- [ ] Confirmar que o cron rodou de verdade: `grep '=== ' logs/daily-scan.log logs/remote-latam-cron.log | tail -6` (ver
       aviso no topo — hoje isso ainda precisa de checagem manual, não é garantido)
 - [ ] `node scripts/fresh-pending.mjs`
 - [ ] `/career-ops pipeline --fresh-only`
@@ -435,7 +439,8 @@ Verificados no repositório, atualizado em 28/09/2026:
   A confirmação anterior de 25/09 estava errada (leitura errada da data de uma linha de log); esta
   vem dos timestamps dos pares `start`/`done`. Ver aviso no topo e seção 4.
 - [ ] **Agendador de Tarefas do Windows como alternativa ao cron:** documentado, não configurado.
-- [ ] **`/etc/wsl.conf` com `service cron start` no boot:** não configurado.
+- [x] **`/etc/wsl.conf` com `service cron start` no boot:** já configurado (conferido 05/10).
+- [x] **Remote LATAM no cron (07:20):** instalado em 05/10; confirmar o 1º disparo em 06/10.
 
 **Risco de ToS:** LinkedIn e Vagas.com Search rodam sob uso pessoal restrito pelos próprios
 projetos. Volume baixo e frequência manual reduzem o risco de bloqueio, mas não o eliminam.
@@ -447,7 +452,7 @@ decidir isso de propósito.
 ```
 scripts/run-daily-scan.sh     cron: Gupy → scan.mjs → ordena
 scripts/run-manual-scan.sh    LinkedIn + Vagas.com (manual)
-scripts/run-remote-latam-scan.sh  boards remotos LATAM → fila (manual, seção 5b)
+scripts/run-remote-latam-scan.sh  boards remotos LATAM → fila (cron 07:20, seção 5b)
 scripts/scan-remote-latam.mjs funil dos boards remotos (catálogo remote-latam.yml)
 lib/latam-eligibility.mjs     filtro de região (LATAM / Brasil / worldwide)
 scripts/import-jobs.mjs       import + filtros + ordenação da fila
@@ -463,3 +468,68 @@ data/applications.md          tracker
 data/discard.log              descartes do pre-screen, com motivo (no git)
 logs/                         logs e backups (fora do git)
 ```
+
+---
+
+## 13. Guia diário passo a passo, por cenário
+
+Um comando por passo. Rode na raiz do repo (`cd ~/career-ops`). `/career-ops ...` é dentro do Claude Code.
+
+### A. Dia normal (cron rodou): 5-15 min
+1. `grep '=== ' logs/daily-scan.log logs/remote-latam-cron.log | tail -6` → `done` de hoje (~07:00 e ~07:20)
+2. `node scripts/fresh-pending.mjs` → quantas vagas frescas
+3. `/career-ops pipeline --fresh-only` → avalia só as com menos de 2 dias
+4. Score ≥ 4.0: `/career-ops pdf`, depois `/career-ops apply` (o sistema preenche; você clica Submit)
+5. Depois de enviar de verdade: `node set-status.mjs N Applied --on AAAA-MM-DD`, depois `node followup-seed.mjs N --date AAAA-MM-DD`
+
+### B. Cron não disparou (WSL desligado às 07:00)
+1. `service cron status` → se parado: `sudo service cron start`
+2. `scripts/run-daily-scan.sh`
+3. `scripts/run-remote-latam-scan.sh`
+4. Siga o cenário A a partir do passo 2
+
+### C. Voltou de folga ou fim de semana (intervalo > 3 dias)
+1. `JOBAGE=7 scripts/run-daily-scan.sh`
+2. `JOBAGE=7 scripts/run-remote-latam-scan.sh`
+3. `node scripts/fresh-pending.mjs`; se o backlog estiver grande, avaliação por recorte (seção 7b)
+
+### D. Varredura manual (2-3x/semana: LinkedIn + Vagas.com)
+1. `scripts/run-manual-scan.sh --dry-run` → confere o funil
+2. `scripts/run-manual-scan.sh` (`JOBAGE=4 scripts/run-manual-scan.sh` se o intervalo passou de 3 dias)
+3. `tail -3 logs/import-age.tsv` → se bateu no teto de página, `--pages 2` só nessa rodada
+
+### E. Avaliar o backlog (2-3x/semana)
+1. `node scripts/fresh-pending.mjs`
+2. `/career-ops pipeline` (ou o recorte da seção 7b)
+3. `node merge-tracker.mjs` uma vez no fim do lote; confira as linhas "Update" na saída
+
+### F. Candidatura
+1. `/career-ops apply N` → preenche e para antes do Submit
+2. Você clica Submit e diz "enviei"
+3. `node set-status.mjs N Applied --on AAAA-MM-DD`, depois `node followup-seed.mjs N --date AAAA-MM-DD`
+
+### G. Resposta de recrutador ou entrevista
+1. `node invite-match.mjs` (convite colado) ou `node paste-reply.mjs` (e-mail colado)
+2. `/career-ops reply-watch`
+3. `node set-status.mjs N Responded` (ou `Interview`, `Rejected`)
+4. Entrevista marcada: `/career-ops interview-prep`
+
+### H. Semanal (sexta)
+1. `node followup-cadence.mjs`
+2. `node verify-pipeline.mjs` (0 erros)
+3. `node check-jd-archive.mjs --summary` e `node stats.mjs --summary`
+4. `/career-ops patterns` se houver 20-30 avaliações novas
+5. `node update-system.mjs check`
+
+### I. Fonte remota quebrou ou veio pouca vaga
+1. `tail -5 logs/remote-latam.tsv` → coluna `error` preenchida ou `fetched=0`
+2. `scripts/run-remote-latam-scan.sh --dry-run --source ID` → isola a fonte
+3. Se persistir: `enabled: false` dessa fonte em `remote-latam.yml` até corrigir
+
+### J. Diagnóstico rápido
+| Sintoma | Comando |
+|---|---|
+| Sem `start` de hoje no log | `service cron status`, `crontab -l`; cenário B |
+| `already running, skipping` | `pgrep -af 'run-daily-scan\|run-remote-latam'`; espere ou encerre o travado |
+| Fila fora de ordem | `node scripts/import-jobs.mjs --sort-only` |
+| Fila quebrada após limpeza | restaurar de `logs/pipeline.before-*.md` |
