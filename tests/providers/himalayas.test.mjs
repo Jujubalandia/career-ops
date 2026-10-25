@@ -142,6 +142,33 @@ try {
   } else {
     fail(`himalayas.fetch() normalized row = ${JSON.stringify(fetched[0])}`);
   }
+  // Search mode (entry.queries)
+  const { resolveSearch, searchPageUrl } = himalayasModule;
+  const item = (n, extra = {}) => ({ title: `AI Engineer ${n}`, companyName: 'Acme', locationRestrictions: [], pubDate: 1782538666, excerpt: 'Builds agents', employmentType: 'Full Time',
+    applicationLink: `https://himalayas.app/companies/acme/jobs/ai-engineer-${n}`, ...extra });
+  const calls = [];
+  const pages = [{ jobs: Array.from({ length: 20 }, (_, i) => item(i)) }, { jobs: [item(0), item(99, { locationRestrictions: ['Brazil'], employmentType: 'Contractor' })] }];
+  const searched = await himalayas.fetch({ name: 'H', provider: 'himalayas', queries: ['ai engineer'], country: 'br', max_pages: 3 },
+    { sleep: async () => {}, fetchJson: async (url, opts) => { calls.push({ url, opts }); return pages.shift(); } });
+  if (calls.length === 2 && calls[0].url === 'https://himalayas.app/jobs/api/search?q=ai+engineer&country=BR&page=1' && calls[1].url.endsWith('&page=2')) {
+    pass('search mode: one request per page, country upper-cased, stops on a short page');
+  } else fail(`search mode requests = ${JSON.stringify(calls.map((c) => c.url))}`);
+  if (calls.every((c) => c.opts.redirect === 'error')) pass('search mode passes redirect:"error"');
+  else fail('search mode must pass redirect:"error"');
+  if (searched.length === 21 && searched[0].location === 'Worldwide' && searched[0].meta.employmentType === 'FULL_TIME' && searched[0].description === 'Builds agents') {
+    pass('search mode: de-duplicates, empty restrictions = Worldwide, type and excerpt mapped');
+  } else fail(`search mode rows = ${searched.length} ${JSON.stringify(searched[0])}`);
+  if (searched.at(-1).location === 'Brazil' && searched.at(-1).meta.employmentType === 'CONTRACTOR') pass('search mode keeps explicit restrictions');
+  else fail(`search mode last row = ${JSON.stringify(searched.at(-1))}`);
+
+  let bad = 0;
+  for (const entry of [{ queries: [] }, { queries: [''] }, { queries: ['a'], country: 'Brazil' }, { queries: Array(13).fill('a') }]) {
+    try { resolveSearch(entry); bad++; } catch { /* expected */ }
+  }
+  if (bad === 0) pass('search mode: invalid entries throw before any request');
+  else fail(`${bad} invalid search entries were accepted`);
+  if (searchPageUrl({ country: '' }, 'a b', 2) === 'https://himalayas.app/jobs/api/search?q=a+b&page=2') pass('search URL omits country when unset');
+  else fail('search URL with no country is wrong');
 } catch (e) {
   fail(`himalayas provider tests crashed: ${e.message}`);
 }

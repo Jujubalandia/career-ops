@@ -75,7 +75,26 @@ sources:
   - id: himalayas
     provider: himalayas
     enabled: true
-    notes: location = locationRestrictions, useful to separate worldwide from region-locked
+    # Search mode: the plain feed is only the 50 newest of ~130k postings. `country: BR`
+    # keeps postings open to Brazil (worldwide ones included); results are ranked by
+    # relevance, so max_pages x 20 rows per query is the depth. 8 queries x 3 pages ~ 25 s.
+    queries: [ai engineer, machine learning, llm, agentic, mlops, ai governance, head of ai, director of data]
+    country: BR
+    max_pages: 3
+    notes: location = locationRestrictions (empty = Worldwide), useful to separate worldwide from region-locked
+
+  # FreeHire (https://freehire.me): IT job aggregator with a public JSON API (robots.txt asks
+  # bots to use it). `regions` + `countries` form an OR group, so this is "LATAM or Brazil";
+  # the window comes from --since (posted_within_days). It also re-lists boards read directly
+  # above (himalayas...): the URL and company+role dedup absorb the overlap.
+  - id: freehire
+    provider: freehire
+    enabled: true
+    queries: [ai engineer, machine learning engineer, llm, agentic, mlops, ai governance, head of ai, director of data, gerente de dados, gerente de ia]
+    regions: [latam]
+    countries: [br]
+    max_pages: 2
+    notes: public API, no key, 600 req/min; identifies itself with a career-ops User-Agent
 
   - id: jobicy
     provider: jobicy

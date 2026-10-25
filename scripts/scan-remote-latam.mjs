@@ -23,7 +23,7 @@
  *   node scripts/scan-remote-latam.mjs --source remotive --since 3
  *   node scripts/scan-remote-latam.mjs --verify           # drop dead postings too
  *
- * Flags: --dry-run  --since DAYS (default $JOBAGE or 3)  --source ID  --verify
+ * Flags: --dry-run  --since DAYS (default $JOBAGE or 4)  --source ID  --verify
  *        --limit N (cap new rows per run)  --catalog FILE  --json  --help
  */
 
@@ -41,6 +41,7 @@ import { makeHttpCtx } from '../providers/_http.mjs';
 import { getCareerOpsRoot } from '../path-resolver.mjs';
 import { classifyLatam } from '../lib/latam-eligibility.mjs';
 import { classifyJob, DOMAINS, ENGAGEMENTS } from '../lib/job-class.mjs';
+import { isInPerson, priorityTag, priorityTier } from '../lib/job-priority.mjs';
 import { isMainModule } from '../lib/is-main-module.mjs';
 import { localToday } from '../lib/local-today.mjs';
 
@@ -168,13 +169,14 @@ export function runFunnel(jobs, { sourceId, filters, sinceDays, snapshot, now = 
     if (unknown) counts.locUnknown++;
     if (age === null) counts.undated++; // undated among the NEW rows: the ones the age gate could not judge
     counts.new++;
+    const tier = priorityTier({ domain: cls.domain, location: job.location, remote: typeof job.meta?.work_mode === 'string' ? job.meta.work_mode === 'remote' : !isInPerson(job.location), eligible: region.eligible });
     offers.push({
       url,
       company,
       title,
       location: typeof job.location === 'string' ? job.location.trim() : '',
       postedAt: typeof job.postedAt === 'number' ? job.postedAt : undefined,
-      note: `remote-latam:${sourceId} ${cls.label}${unknown ? ' loc?' : ''}`,
+      note: `remote-latam:${sourceId} ${cls.label} ${priorityTag(tier)}${unknown ? ' loc?' : ''}`,
       source: `remote-latam:${sourceId}`,
     });
   }
@@ -185,7 +187,7 @@ export function runFunnel(jobs, { sourceId, filters, sinceDays, snapshot, now = 
 
 const HELP = `Usage: node scripts/scan-remote-latam.mjs [--dry-run] [--since DAYS] [--source ID] [--verify]
                                     [--limit N] [--catalog FILE] [--json]
-  --since DAYS   keep postings newer than DAYS (default $JOBAGE or 3); undated postings are kept and counted
+  --since DAYS   keep postings newer than DAYS (default $JOBAGE or 4); undated postings are kept and counted
   --source ID    run only this catalog source (even if it is disabled there)
   --verify       drop dead postings with check-liveness.mjs before writing
   --limit N      write at most N new rows
@@ -241,7 +243,7 @@ function writeLog(rows) {
 export async function main(argv = process.argv.slice(2), deps = {}) {
   const args = parseArgs(argv);
   if (args.help) { console.log(HELP); return 0; }
-  const sinceDays = args.since ?? Number(process.env.JOBAGE ?? 3);
+  const sinceDays = args.since ?? Number(process.env.JOBAGE ?? 4);
 
   const { file, usingTemplate } = resolveCatalogPath(args.catalog);
   const catalog = parseCatalog(readFileSync(file, 'utf8'));

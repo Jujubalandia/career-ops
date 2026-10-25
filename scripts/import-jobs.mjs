@@ -40,6 +40,7 @@ import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
 import { PIPELINE_PATH, appendToPipeline, atomicWriteFile, companyRoleDedupKey, formatPipelineOffer, loadDedupSnapshot, normalizeUrlForDedup } from '../scan.mjs';
 import { isMainModule } from '../lib/is-main-module.mjs';
+import { lineTier, priorityTag } from '../lib/job-priority.mjs';
 import { withPipelineLock } from '../pipeline-lock.mjs';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
@@ -154,11 +155,11 @@ export function withinJobage(card, days, now = new Date()) {
 }
 
 /**
- * Order the `## Pending` section newest-first by its `posted: YYYY-MM-DD` segment, so the
- * freshest postings sit at the top of the queue (/career-ops pipeline walks it top-down).
+ * Order the `## Pending` section by priority tier (lib/job-priority.mjs), then newest-first by its
+ * `posted: YYYY-MM-DD` segment, so the best and freshest postings sit at the top of the queue (/career-ops pipeline walks it top-down).
  *   1. rows pasted by hand (a bare `- [ ] url`, no ` | ` columns) stay on top: the user put
  *      them there on purpose and a missing date says nothing about their age;
- *   2. dated rows, newest first;
+ *   2. dated rows, tier 1 then 2 then 3, newest first inside a tier;
  *   3. rows with no date (some providers expose none), at the bottom, in their old order.
  * The sort is stable, so equal dates keep their existing order. Blank lines inside Pending
  * (leftovers of each append) are dropped: one blank after the header, one before the next
@@ -174,11 +175,11 @@ export function sortPending(text) {
   const rank = (l) => {
     if (l.startsWith('- [ ] ') && !l.includes(' | ')) return { g: 0 };
     const d = /\| posted: (\d{4}-\d{2}-\d{2})/.exec(l)?.[1];
-    return d ? { g: 1, d } : { g: 2 };
+    return d ? { g: 1, d, t: lineTier(l) } : { g: 2 };
   };
   const items = lines.slice(start + 1, end).filter((l) => l.trim() !== '')
     .map((l, i) => ({ l, i, ...rank(l) }))
-    .sort((a, b) => a.g - b.g || (a.g === 1 && a.d !== b.d ? (a.d < b.d ? 1 : -1) : 0) || a.i - b.i);
+    .sort((a, b) => a.g - b.g || (a.g === 1 ? a.t - b.t : 0) || (a.g === 1 && a.d !== b.d ? (a.d < b.d ? 1 : -1) : 0) || a.i - b.i);
 
   const tail = lines.slice(end);
   return [...lines.slice(0, start + 1), '', ...items.map((x) => x.l), ...(tail.length ? ['', ...tail] : [''])].join('\n');
@@ -274,13 +275,14 @@ export function dropExpired(offers) {
 /** Gupy card → the offer shape scan.mjs providers emit (postedAt is epoch ms). */
 export function toOffer(card, note = 'gupy') {
   const postedAt = parseCardDate(card.date);
+  const tier = lineTier(`- [ ] ${card.url} | ${companyOf(card)} | ${card.title} | ${card.location || ''}`);
   return {
     url: card.url,
     company: companyOf(card),
     title: card.title,
     location: card.location || '',
     postedAt: Number.isFinite(postedAt) ? postedAt : undefined,
-    note,
+    note: `${note} ${priorityTag(tier)}`,
   };
 }
 
@@ -323,8 +325,8 @@ function selftest() {
   const merged = mergeById([a, { ...a, title: 'dup' }, { id: '2', url: 'https://b.gupy.io/jobs/2', title: 'X', company: null, date: null }]);
   assert.equal(merged.length, 2);
   assert.equal(formatPipelineOffer(toOffer(merged[0])),
-    '- [ ] https://acme.gupy.io/jobs/1 | Acme | Engenheiro de IA | Remoto | posted: 2026-09-20 | note: gupy');
-  assert.equal(formatPipelineOffer(toOffer(merged[1])), '- [ ] https://b.gupy.io/jobs/2 | b | X | note: gupy');
+    '- [ ] https://acme.gupy.io/jobs/1 | Acme | Engenheiro de IA | Remoto | posted: 2026-09-20 | note: gupy prio:1');
+  assert.equal(formatPipelineOffer(toOffer(merged[1])), '- [ ] https://b.gupy.io/jobs/2 | b | X | note: gupy prio:3');
   assert.equal(companyOf({ company: 'VENHA SER #SANGUELARANJA 🧡🚀', url: 'https://fcamara.gupy.io/job/x' }), 'fcamara');
   assert.equal(companyOf({ company: 'Venha fazer parte do Corporativo da Hospital Care', url: 'https://hospitalcare.gupy.io/job/x' }), 'hospitalcare');
   assert.equal(companyOf({ company: 'PagBank', url: 'https://pagseguro.gupy.io/job/x' }), 'PagBank');
@@ -346,7 +348,7 @@ function selftest() {
   // vagas.com.br: dd/mm/yyyy dates, no tenant subdomain, remote normalized client-side
   const v = { id: '7', title: 'Engenheiro de IA', company: 'Acme', location: 'Home Office', date: '20/09/2026', url: 'https://www.vagas.com.br/vagas/v7/x' };
   assert.equal(formatPipelineOffer(toOffer(SOURCES.vagas.normalize(v), 'vagas')),
-    '- [ ] https://www.vagas.com.br/vagas/v7/x | Acme | Engenheiro de IA | Remoto | posted: 2026-09-20 | note: vagas');
+    '- [ ] https://www.vagas.com.br/vagas/v7/x | Acme | Engenheiro de IA | Remoto | posted: 2026-09-20 | note: vagas prio:1');
   assert.equal(companyOf({ company: null, url: v.url }), '?');
   assert.equal(SOURCES.vagas.normalize({ ...v, location: 'São Paulo - SP' }).location, 'São Paulo - SP');
   assert.equal(SOURCES.vagas.normalize({ ...v, location: 'São Paulo - SP', title: 'AI Engineer (Remoto)' }).location, 'Remoto');
@@ -399,7 +401,7 @@ function selftest() {
   const lr = SOURCES.linkedin.normalize(li, 'remote');
   assert.equal(lr.url, 'https://www.linkedin.com/jobs/view/123');
   assert.equal(formatPipelineOffer(toOffer(lr, 'linkedin')),
-    '- [ ] https://www.linkedin.com/jobs/view/123 | Acme | AI Engineer | Remoto | posted: 2026-09-20 | note: linkedin');
+    '- [ ] https://www.linkedin.com/jobs/view/123 | Acme | AI Engineer | Remoto | posted: 2026-09-20 | note: linkedin prio:1');
   assert.equal(SOURCES.linkedin.normalize(li, 'hybrid').location, 'Brazil');
   assert.equal(SOURCES.linkedin.normalize({ ...li, title: 'AI Engineer Senior / Híbrido- BH' }, 'remote').location, 'Brazil'); // not really remote
   assert.equal(companyRoleDedupKey('Nubank', 'AI Risk Management Senior Specialist'), companyRoleDedupKey(' nubank ', 'AI Risk Management Senior Specialist'));

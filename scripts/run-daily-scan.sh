@@ -2,7 +2,7 @@
 # Daily unattended scan, meant for cron (see docs/AUTOMATION.md). Zero LLM tokens; it only
 # fills data/pipeline.md and never runs /career-ops pipeline.
 #
-#   1. Gupy: cards posted in the last $JOBAGE days (default 3, scripts/import-config.sh),
+#   1. Gupy: cards posted in the last $JOBAGE days (default 4, scripts/import-config.sh),
 #      dead links dropped, new ones appended. Age discards are logged in logs/import-age.tsv.
 #   2. node scan.mjs --verify --since $JOBAGE: the portals.yml boards (this is the only
 #      thing --verify covers; step 1 does its own liveness check).

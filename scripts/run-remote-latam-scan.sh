@@ -7,7 +7,7 @@
 # (own crontab line, log logs/remote-latam-cron.log; see docs/RUNBOOK-pipeline-diario.md section 4).
 #
 #   scripts/run-remote-latam-scan.sh --dry-run         # funnel per source, nothing written
-#   scripts/run-remote-latam-scan.sh                    # write new rows (window: $JOBAGE, default 3)
+#   scripts/run-remote-latam-scan.sh                    # write new rows (window: $JOBAGE, default 4)
 #   JOBAGE=7 scripts/run-remote-latam-scan.sh           # widen the window for one run
 #   scripts/run-remote-latam-scan.sh --source getonbrd  # one source (even a disabled one)
 #   DRY_RUN=1 scripts/run-remote-latam-scan.sh          # same as --dry-run
