@@ -1,6 +1,6 @@
 # Runbook: pipeline de busca de vagas (career-ops)
 
-Atualizado em 05/10/2026 · mantido pelo dono do fork
+Atualizado em 25/10/2026 · mantido pelo dono do fork
 
 Rotina do dia a dia para achar, avaliar e aplicar em vagas. Onde algo **ainda não foi testado
 ao vivo**, está marcado (seção 11 tem o status de cada item).
@@ -9,27 +9,31 @@ ao vivo**, está marcado (seção 11 tem o status de cada item).
 > gasta token e roda por lote. O sistema **nunca envia candidatura sozinho**: ele preenche,
 > você revisa e clica em Submit. `Applied` só depois de você enviar de verdade.
 
-> ✅ **Estado real do cron em 02/10:** o cron **disparou sozinho** às 07:00:01 em 29/09, 30/09 e
-> 01/10 (pares `start`/`done` em `logs/daily-scan.log`). Em 02/10 a rodada registrada é das 07:41,
-> ou seja, atrasada: o WSL provavelmente só estava de pé depois das 07:00. A persistência no boot
-> (`/etc/wsl.conf`) e o Agendador do Windows continuam não configurados; a janela de 3 dias
-> (`--jobage 3`) cobre disparos perdidos pontuais. Seção 4 tem o diagnóstico.
+> 🖐️ **Tudo manual desde 25/10/2026.** O cron foi removido (as duas linhas antigas estão
+> descritas na seção 4). Você roda os scans à mão, **toda manhã**,
+> com janela de **4 dias** (`JOBAGE=4`) fora do Claude e `--fresh-only` de 4 dias dentro dele.
+> Lista curta de comandos: [`CHECKLIST.md`](../CHECKLIST.md).
+>
+> 🎯 **Prioridade da fila:** `prio:1` remoto LATAM de engenharia de IA e correlatos → `prio:2` gerente,
+> diretor ou head de IA/Dados (remoto ou São Paulo híbrido) → `prio:3` o resto. A fila e o
+> `fresh-pending` já saem nessa ordem (seção 6b).
 
 ---
 
 ## 1. Visão geral
 
-Três fontes de vagas alimentam uma fila única, com dois ritmos de automação:
+Quatro fontes de vagas alimentam uma fila única. **Nenhuma roda sozinha**: sem cron, você dispara cada uma à mão (ver `CHECKLIST.md`).
 
-- **Gupy** (sem restrição de ToS declarada): cron diário, junto com os portais do `scan.mjs`.
-- **LinkedIn e Vagas.com** (uso pessoal restrito pelos próprios projetos): rodadas manuais.
+- **Gupy** + portais do `scan.mjs` (sem restrição de ToS declarada): `scripts/run-daily-scan.sh`.
+- **Boards remotos LATAM** (Remotive, Get on Board, FreeHire, Himalayas...): `scripts/run-remote-latam-scan.sh`.
+- **LinkedIn e Vagas.com** (uso pessoal restrito pelos próprios projetos): `scripts/run-manual-scan.sh`, 2-3x por semana.
 - **career-ops:** sistema de registro único. Tracker, scoring A-H, geração de CV e carta. Todas
   as fontes convergem para `data/pipeline.md`.
 
 ## 2. Fluxo de dados
 
 ```
- CRON 07:00  scripts/run-daily-scan.sh                                   (0 tokens)
+ MANUAL      scripts/run-daily-scan.sh        (junto com run-remote-latam-scan.sh)   (0 tokens)
    ┌─ 1. Gupy CLI ──► import-jobs.mjs ──► descarta > JOBAGE dias ──► filtros de título/cidade
    │                        ──► dedup (URL + empresa+cargo) ──► --verify (vaga viva?) ──┐
    ├─ 2. node scan.mjs --verify --since JOBAGE   (portais do portals.yml, verifica só   ├─► data/pipeline.md
@@ -40,7 +44,7 @@ Três fontes de vagas alimentam uma fila única, com dois ritmos de automação:
              (--pages N para ver além da 1ª página — seção 5)
 
  AVALIAÇÃO (gasta tokens)
-   /career-ops pipeline --fresh-only ──► só vagas com < 2 dias      (diário, rápido)
+   /career-ops pipeline --fresh-only ──► só vagas dos últimos 4 dias, na ordem prio 1→2→3   (diário)
    /career-ops pipeline              ──► backlog inteiro             (2-3x/semana)
    avaliação por recorte             ──► fatia do backlog por rank/critério  (seção 7b)
         └─► /career-ops pdf ──► /career-ops apply ──► candidatura manual (você clica Submit)
@@ -55,11 +59,11 @@ Três fontes de vagas alimentam uma fila única, com dois ritmos de automação:
 
 | Componente | Frequência | Custo | Quem roda |
 |---|---|---|---|
-| Scan Gupy (`--jobage 3`) | Diário, 07:00 (**ver aviso no topo**) | 0 token | Cron |
-| `node scan.mjs --verify --since 3` | Junto com o scan diário | 0 token | Cron (mesmo script) |
+| Scan Gupy (`JOBAGE=4`) | Diário, de manhã | 0 token | Manual |
+| `node scan.mjs --verify --since 4` | Junto com o scan diário | 0 token | Manual (mesmo script) |
 | Scan LinkedIn / Vagas.com | 2-3x/semana | 0 token | Manual |
-| Scan remoto LATAM (seção 5b) | Diário, 07:20 | 0 token | Cron (linha própria) |
-| Pass `--fresh-only` (< 2 dias) | Diário, rápido | Token (menor) | Manual (sem agendamento) |
+| Scan remoto LATAM (seção 5b) | Diário, logo após o scan diário | 0 token | Manual |
+| Pass `--fresh-only` (últimos 4 dias) | Diário, rápido | Token (menor) | Manual |
 | `/career-ops pipeline` (backlog) | 2-3x/semana, ou ao acumular 15-25 vagas novas | Token | Manual |
 | Avaliação por recorte (seção 7b) | Sob demanda, quando o backlog geral é grande demais para rodar de uma vez | Token | Manual |
 | `/career-ops patterns` | A cada 20-30 avaliações novas, ou semanal | Token | Manual |
@@ -68,66 +72,32 @@ Três fontes de vagas alimentam uma fila única, com dois ritmos de automação:
 
 ---
 
-## 4. Setup do cron (uma vez) + diagnóstico de disparo
+## 4. Sem cron (desde 25/10/2026)
 
-Neste WSL2 o daemon do cron não sobe sozinho. Os comandos assumem o repo em `~/career-ops`; ajuste se estiver em outro lugar.
+O `crontab` foi esvaziado: as duas linhas antigas (`0 7 * * *` `run-daily-scan.sh` e `20 7 * * *`
+`run-remote-latam-scan.sh`) saíram. Os scripts continuam iguais, só que agora são comandos manuais.
+Confirmar: `crontab -l` não deve listar nada do career-ops.
 
-- [x] **Subir o daemon:** `sudo service cron start` — feito, `service cron status` confirma rodando.
-- [x] **Instalar a linha das 07:00:** já está em `crontab -l`.
-  ```bash
-  (crontab -l 2>/dev/null; echo '0 7 * * * $HOME/career-ops/scripts/run-daily-scan.sh >> $HOME/career-ops/logs/daily-scan.log 2>&1') | crontab -
-  crontab -l && service cron status
-  ```
-- [x] **Linha das 07:20 (remote LATAM):** instalada em 05/10, log próprio `logs/remote-latam-cron.log`,
-  `flock` próprio. Sem `--verify` por enquanto; ligue depois de ~1 semana de logs limpos.
-  ```bash
-  (crontab -l; echo '20 7 * * * $HOME/career-ops/scripts/run-remote-latam-scan.sh >> $HOME/career-ops/logs/remote-latam-cron.log 2>&1') | crontab -
-  ```
-- [x] **Persistir entre boots:** `/etc/wsl.conf` já tem `[boot] command = "ntpdate pool.ntp.org; service cron start"`
-  (conferido em 05/10). Mudar exige `sudo` e `wsl --shutdown` no PowerShell.
-- [x] **Chromium do Playwright** (o `--verify` precisa): já instalado em `~/.cache/ms-playwright`.
-- [x] **Teste sem gravar** (~1,5 min, ambiente mínimo como o do cron):
-  ```bash
-  cd $HOME/career-ops
-  env -i HOME=$HOME PATH=/usr/bin:/bin DRY_RUN=1 scripts/run-daily-scan.sh 2>&1 | tail -25
-  ```
-  Esperado no fim: `daily-scan done (import=0 scan=0 sort=0)`. **Já rodou com sucesso.**
-
-### Diagnóstico: o cron disparou sozinho hoje?
-
-Rode isto pela manhã, depois das 07:00, para confirmar (não confie de memória — já aconteceu de eu
-ler a data errada de uma linha de log e achar que tinha rodado quando não tinha):
-
+Se um dia quiser voltar ao automático:
 ```bash
-grep '=== ' logs/daily-scan.log logs/remote-latam-cron.log | tail -6      # toda "start"/"done" registrada, com timestamp
-crontab -l                                      # a linha ainda está lá?
-service cron status                             # o daemon ainda está de pé?
+(crontab -l 2>/dev/null; echo '0 7 * * * $HOME/career-ops/scripts/run-daily-scan.sh >> $HOME/career-ops/logs/daily-scan.log 2>&1'; echo '20 7 * * * $HOME/career-ops/scripts/run-remote-latam-scan.sh >> $HOME/career-ops/logs/remote-latam-cron.log 2>&1') | crontab -
+sudo service cron start
+```
+(O `/etc/wsl.conf` ainda sobe o `cron` no boot; é inofensivo sem linhas no crontab.)
+
+Pré-requisitos dos scans manuais (já instalados): Chromium do Playwright para o `--verify`
+(`npx playwright install chromium` se faltar). Teste sem gravar, ~1,5 min:
+```bash
+cd ~/career-ops && DRY_RUN=1 scripts/run-daily-scan.sh 2>&1 | tail -25     # esperado: daily-scan done (import=0 scan=0 sort=0)
 ```
 
-Se a última linha `start` não for de hoje por volta das 07:00, **o cron não disparou** — o daemon
-rodando e a linha no crontab não garantem o disparo (motivo provável: WSL suspenso/desligado às
-07:00, ou o daemon caiu depois de um `wsl --shutdown`/reinício sem persistência configurada).
-
-> **Estado em 02/10:** o cron disparou sozinho às 07:00:01 em 29/09, 30/09 e 01/10. Em 02/10 a
-> rodada foi às 07:41 (WSL atrasado). Se a última linha `start` não for de ~07:00, rode
-> `scripts/run-daily-scan.sh` manualmente, ou migre para a alternativa do Agendador do Windows abaixo.
-
-> **Limitação do WSL2:** sem terminal aberto o WSL pode estar desligado às 07:00 e o cron não
-> dispara. Alternativa mais robusta, que **acorda o WSL sozinha** (não depende do daemon do cron):
-> Agendador de Tarefas do Windows, diário às 07:00:
-> ```bash
-> schtasks.exe /Create /TN "career-ops daily scan" /SC DAILY /ST 07:00 /F /TR "wsl.exe -d <distro> -u <usuario> -- bash -lc '$HOME/career-ops/scripts/run-daily-scan.sh >> $HOME/career-ops/logs/daily-scan.log 2>&1'"
-> schtasks.exe /Query /TN "career-ops daily scan" /V /FO LIST | grep -E "Last Run|Last Result"
-> ```
-> `Last Result: 0` confirma sucesso. Ainda não configurado neste ambiente.
-> A janela de 3 dias (`--jobage 3`) cobre até 2 dias perdidos sem perder vaga, então um disparo
-> perdido ocasionalmente não é grave — mas vários dias seguidos sem disparo, sim.
+**Como saber que o scan de hoje rodou:** o próprio terminal termina com `daily-scan done` e `remote-latam-scan done` (a saída só vai para `logs/` se você redirecionar). O histórico por fonte do scan remoto fica em `logs/remote-latam.tsv`.
 
 ### O que o `run-daily-scan.sh` roda
 
-1. `import-jobs.mjs --source gupy --pages 3 --remote remote,hybrid,onsite --jobage 3 --verify`
+1. `import-jobs.mjs --source gupy --pages 3 --remote remote,hybrid,onsite --jobage 4 --verify`
    com filtro de cidade (São Paulo) e de títulos.
-2. `node scan.mjs --verify --throttle --since 3`
+2. `node scan.mjs --verify --throttle --since 4`
 3. `import-jobs.mjs --sort-only`
 
 `flock` impede duas execuções sobrepostas. `DRY_RUN=1` roda tudo sem gravar. Os passos são
@@ -137,7 +107,7 @@ independentes e o script sai com erro se algum falhar.
 
 ## 5. Rotina manual: LinkedIn e Vagas.com
 
-Não entram em cron. O LinkedIn porque acesso automatizado contraria os Termos de Serviço; a
+Nunca foram automáticos. O LinkedIn porque acesso automatizado contraria os Termos de Serviço; a
 Vagas.com porque o `robots.txt` bloqueia nominalmente crawlers da Anthropic. Ambos os projetos
 avisam "uso pessoal, volume baixo". Automação diária aumenta o risco de bloqueio de IP sem
 ganho proporcional.
@@ -149,8 +119,8 @@ JOBAGE=4 scripts/run-manual-scan.sh            # janela de 4 dias, só para esta
 JOBAGE=4 scripts/run-manual-scan.sh --pages 2  # janela maior + 2ª página (ver diagnóstico abaixo)
 ```
 
-Rode 2-3x por semana. A janela padrão é 3 dias: se o intervalo entre duas rodadas for maior
-(ex.: sexta → segunda à tarde), use `JOBAGE=4` (ou mais) para não perder o que saiu no meio.
+Rode 2-3x por semana. A janela padrão é 4 dias: se o intervalo entre duas rodadas for maior
+(ex.: sexta → terça), use `JOBAGE=6` (ou mais) para não perder o que saiu no meio.
 **A janela é a variável `JOBAGE`, não a flag `--jobage`**: passar `--jobage` ao script dá erro
 de flag repetida. `--pages` (e qualquer outra flag) passa direto para as duas fontes, porque o
 script repassa `"$@"`.
@@ -174,18 +144,18 @@ isso de propósito (ver "Regra de ouro" e o aviso de ToS acima).
 
 ---
 
-## 5b. Fontes remotas LATAM (cron 07:20 + manual)
+## 5b. Fontes remotas LATAM (manual, diário)
 
-Boards remotos gratuitos com feed ou API (Remotive, Get on Board, Hacker News "Who is hiring?", Working Nomads, Himalayas, Jobicy, We Work Remotely, NoDesk) alimentam a mesma fila, sem passar pelo Gupy nem pelo `scan.mjs`. Catálogo em `remote-latam.yml` (copie de `templates/remote-latam.example.yml`).
+Boards remotos gratuitos com feed ou API (Remotive, Get on Board, FreeHire, Himalayas, Hacker News "Who is hiring?", Working Nomads, Jobicy, We Work Remotely, NoDesk, RemoteYeah, TryRemotely, AIGigJobs) alimentam a mesma fila, sem passar pelo Gupy nem pelo `scan.mjs`. Catálogo em `remote-latam.yml` (copie de `templates/remote-latam.example.yml`).
 
 ```bash
 scripts/run-remote-latam-scan.sh --dry-run     # funil por fonte, não grava
-scripts/run-remote-latam-scan.sh               # grava as novas (janela: JOBAGE, padrão 3)
+scripts/run-remote-latam-scan.sh               # grava as novas (janela: JOBAGE, padrão 4)
 ```
 
-Cada linha leva `note: remote-latam:<fonte>`, e `loc?` quando o board não diz a região (confira no pre-screen). O volume é baixo (~10 linhas por rodada de 7 dias é o normal). A nota também traz a classe do trabalho (`freelance/ai-ml-eng $60-150/h`, `employee/governance`...); a fonte `aigigjobs` (freelance de IA e dados, ~1 min por rodada) filtra por classe em vez de título. Detalhes, regras de região e auditoria das fontes: `docs/REMOTE-LATAM-SOURCES.md`. Roda no cron às 07:20 (linha própria, seção 4), **não** dentro do `run-daily-scan.sh`: lock e log separados. Os comandos acima servem para rodar à mão (cenários B e C da seção 13).
+Cada linha leva `note: remote-latam:<fonte>`, e `loc?` quando o board não diz a região (confira no pre-screen). O volume é baixo (~10 linhas por rodada de 7 dias é o normal). A nota também traz a classe do trabalho (`freelance/ai-ml-eng $60-150/h`, `employee/governance`...); a fonte `aigigjobs` (freelance de IA e dados, ~1 min por rodada) filtra por classe em vez de título. Detalhes, regras de região e auditoria das fontes: `docs/REMOTE-LATAM-SOURCES.md`. Roda à mão (`CHECKLIST.md`), **não** dentro do `run-daily-scan.sh`: lock e log separados. FreeHire (API pública, recorte LATAM+Brasil) e Himalayas (busca por query com `country: BR`, não só o feed das 50 mais novas) são as fontes de maior volume.
 
-## 6. Filtros de freshness (< 3 dias)
+## 6. Filtros de freshness (4 dias)
 
 - **Na fonte:** os três CLIs aceitam `--jobage`. O import **não usa** a flag dos CLIs: Gupy e
   Vagas.com aplicam depois de fatiar a página (uma página curta encerraria a paginação cedo),
@@ -193,12 +163,27 @@ Cada linha leva `note: remote-latam:<fonte>`, e `loc?` quando o board não diz a
 - **No import:** `import-jobs.mjs --jobage N` **descarta** (não só deduplica) o que passou de N
   dias, em dias corridos, antes de escrever em `data/pipeline.md`. **Vaga sem data é mantida**
   e contada. Cada rodada registra a contagem em `logs/import-age.tsv`.
-- **Valor único:** `JOBAGE` (padrão 3) em `scripts/import-config.sh`. Vale para o import
+- **Valor único:** `JOBAGE` (padrão 4) em `scripts/import-config.sh`. Vale para o import
   (`--jobage`) e para o `scan.mjs` (`--since`).
-- **Ordenação:** a fila fica por `posted:` decrescente (mais nova no topo). URL colada à mão
-  fica no topo; sem data, no fim.
-- **Pass `--fresh-only`:** modo separado do `/career-ops pipeline` que avalia só entradas com
-  menos de 2 dias (postadas hoje ou ontem). O backlog segue na cadência normal.
+- **Ordenação:** a fila fica por prioridade (6b) e, dentro dela, por `posted:` decrescente (mais
+  nova no topo). URL colada à mão fica no topo; sem data, no fim.
+- **Pass `--fresh-only`:** modo separado do `/career-ops pipeline` que avalia só entradas
+  postadas nos últimos 4 dias (hoje até 4 dias atrás, mesma borda do `--jobage`). O backlog segue na cadência normal.
+
+## 6b. Prioridade da fila (`prio:1|2|3`)
+
+Zero token, calculada por `lib/job-priority.mjs` a partir do título (classe do trabalho) e do local.
+Aparece no `note:` de toda linha nova e ordena a fila e o `fresh-pending`.
+
+| Tier | O que é | Perfil |
+|---|---|---|
+| **1** | Vaga **remota** aberta a LATAM/Brasil em engenharia de IA e correlatos: `ai-ml-eng`, `ai-eval`, `data-science`, `data-eng`, `governance` | Arquétipos A e B |
+| **2** | **Gerente, diretor ou head** de IA/Dados, remoto aberto ao Brasil **ou** com base em São Paulo (híbrido); governança de IA em São Paulo | Arquétipo C |
+| **3** | O resto (nunca é descartado, só fica depois) | |
+
+Sem tag (linhas do `scan.mjs`/portais), o tier sai do próprio título e local. Uma vaga de uma fonte
+que não diz se é remota (ex.: FreeHire sem `work_mode`) **não** ganha tier 1. Quando a lista de
+frescas for grande, avalie todos os T1 e T2 antes de qualquer T3 (regra em `modes/_custom.md`).
 
 ---
 
@@ -206,8 +191,7 @@ Cada linha leva `note: remote-latam:<fonte>`, e `loc?` quando o board não diz a
 
 **7.1 Conferir a coleta (30 s)**
 ```bash
-grep '=== ' logs/daily-scan.log | tail -4       # o cron (ou você) rodou hoje? (ver seção 4)
-node scripts/fresh-pending.mjs                  # quantas frescas (hoje/ontem) na fila
+node scripts/fresh-pending.mjs                  # frescas dos últimos 4 dias, em ordem T1 → T2 → T3
 ```
 
 **7.2 Avaliar as frescas** (numa sessão do Claude Code neste repo)
@@ -218,7 +202,7 @@ Liveness só nas frescas → pre-screen barato → avaliação completa das que 
 `reports/` → tracker → move para `## Processed`. Não toca no resto da fila. Fecha com a tabela
 de scores e uma linha com o backlog que ficou para o pass normal. **Testado ao vivo** (27/09,
 7 vagas frescas: 4 descartadas no pre-screen, 3 avaliadas por completo).
-Na primeira vez, `node scripts/fresh-pending.mjs --days 1` (só as de hoje) para gastar pouco.
+Para gastar menos, `node scripts/fresh-pending.mjs --days 1` (hoje e ontem).
 
 **7.3 Decidir e aplicar**
 
@@ -299,29 +283,7 @@ Os três são disparados por **gatilho**, não por agenda fixa.
 
 ## 9. Checklist operacional
 
-**Diário**
-- [ ] Confirmar que o cron rodou de verdade: `grep '=== ' logs/daily-scan.log logs/remote-latam-cron.log | tail -6` (ver
-      aviso no topo — hoje isso ainda precisa de checagem manual, não é garantido)
-- [ ] `node scripts/fresh-pending.mjs`
-- [ ] `/career-ops pipeline --fresh-only`
-
-**2-3x/semana (manual)**
-- [ ] `scripts/run-manual-scan.sh` (LinkedIn + Vagas.com; `JOBAGE=4` se o intervalo passar de 3
-      dias; `--pages 2` de vez em quando se `tail -3 logs/import-age.tsv` mostrar teto batido)
-- [ ] `/career-ops pipeline` sobre o acumulado, ou a avaliação por recorte (seção 7b) se o
-      backlog estiver grande demais para rodar de uma vez
-
-**Semanal**
-- [ ] `/career-ops patterns` (se ≥ 20-30 novas avaliações)
-- [ ] Follow-ups pendentes: `node followup-cadence.mjs`
-- [ ] Higiene: `node verify-pipeline.mjs` (0 erros), `node check-jd-archive.mjs --summary`,
-      `node stats.mjs --summary`, `node update-system.mjs check`
-
-**Quinzenal/mensal**
-- [ ] `/career-ops upskill`
-
-**Pontual**
-- [ ] `/career-ops discover` ao adicionar empresa nova
+Movido para [`CHECKLIST.md`](../CHECKLIST.md) (uma tela, com os comandos fora e dentro do Claude).
 
 ---
 
@@ -380,7 +342,7 @@ de avaliações (evita colisão se mais de um processo estiver reservando ao mes
 | Quer mudar | Onde |
 |---|---|
 | Queries, cidade, filtros de título, `JOBAGE` | `scripts/import-config.sh` |
-| Horário do cron | `crontab -e` |
+| Prioridade (tiers) | `lib/job-priority.mjs` (+ `modes/_profile.md` para o scoring) |
 | Janela ou páginas só numa rodada | `JOBAGE=4 scripts/run-manual-scan.sh --pages 2` (ou `run-daily-scan.sh`) |
 | Regra do fresh pass | `modes/_custom.md` → "fresh pass" (camada de usuário, fora do git) |
 | Portais do scan | `portals.yml` |
@@ -388,7 +350,7 @@ de avaliações (evita colisão se mais de um processo estiver reservando ao mes
 ### Logs e backups (`logs/`, fora do git)
 | Arquivo | Conteúdo |
 |---|---|
-| `daily-scan.log` | Saída completa de cada rodada do cron. Cada rodada tem um par `=== ... start ===` / `=== ... done ===` com timestamp — é a prova de que o cron disparou, não uma suposição |
+| `daily-scan.log` | Saída das rodadas que foram redirecionadas para ele (o cron antigo fazia; à mão, use `| tee -a logs/daily-scan.log` se quiser guardar). Cada rodada tem um par `=== ... start ===` / `=== ... done ===` com timestamp — é a prova de que o cron disparou, não uma suposição |
 | `import-age.tsv` | Uma linha por import: `timestamp, source, jobage_days, results, unique, dropped_age, undated_kept, new, dry_run` (filtre `dry_run=0` para o volume real; `results` vs. queries×modos×10 detecta teto de página — seção 5) |
 | `pipeline.before-*.md` | Cópias do `pipeline.md` antes de limpezas e ordenação |
 | `pruned-*.md` | Lista exata do que saiu em cada limpeza |
@@ -402,10 +364,10 @@ Restaurar a fila de antes da última limpeza: `cp logs/pipeline.before-prune-old
 ### Problemas comuns
 | Sintoma | Causa provável | O que fazer |
 |---|---|---|
-| `grep '=== ' logs/daily-scan.log` não mostra rodada de hoje | Cron não disparou (ver aviso no topo — estado conhecido em 28/09) | Rode `scripts/run-daily-scan.sh` manualmente; considere o Agendador do Windows (seção 4) |
+| Esqueceu de rodar o scan hoje | Tudo é manual desde 25/10 | `scripts/run-daily-scan.sh` e `scripts/run-remote-latam-scan.sh`; a janela de 4 dias cobre até 3 dias parados |
 | `already running, skipping` | Outra execução em andamento (ou travada) | Aguarde; se travou, `pgrep -af run-daily-scan` e encerre |
 | `--verify requires Playwright with Chromium` | Chromium ausente | `npx playwright install chromium` |
-| `import ... FAILED` em várias queries | CLI da fonte fora do ar ou `bun` fora do PATH | Rode o CLI à mão; o cron usa `import-config.sh` para o PATH |
+| `import ... FAILED` em várias queries | CLI da fonte fora do ar ou `bun` fora do PATH | Rode o CLI à mão; os scripts usam `import-config.sh` para o PATH |
 | `--jobage was given more than once` | Passou `--jobage` ao `run-manual-scan.sh` | `JOBAGE=4 scripts/run-manual-scan.sh` |
 | Poucas vagas novas, `results` = queries×modos×10 exato | Teto de página (1ª página cheia toda vez) | `--pages 2` numa rodada pontual (seção 5) |
 | Poucas vagas novas, `results` normal (não bate no teto) | Janela/dedup fazendo o trabalho, ou fonte genuinamente sem mais resultados | Não é bug — é o funil funcionando; considere ampliar `JOBAGE` ou trocar queries fracas |
@@ -434,13 +396,9 @@ Verificados no repositório, atualizado em 28/09/2026:
 - [x] **Avaliação por recorte do backlog testada ao vivo** (27/09): 33 vagas filtradas por
   `rank:` ≥ 4.0 sem padrão pré-vendas → liveness sweep → pre-screen com `fetch-jd.mjs` → 18
   descartadas, 5 avaliadas por completo. Ver seção 7b para o passo a passo.
-- [x] **Disparo real do cron às 07:00: confirmado em 02/10.** Rodadas automáticas às 07:00:01 em
-  29/09, 30/09 e 01/10 (`grep '=== ' logs/daily-scan.log`). Em 02/10 só às 07:41 (WSL atrasado).
-  A confirmação anterior de 25/09 estava errada (leitura errada da data de uma linha de log); esta
-  vem dos timestamps dos pares `start`/`done`. Ver aviso no topo e seção 4.
-- [ ] **Agendador de Tarefas do Windows como alternativa ao cron:** documentado, não configurado.
-- [x] **`/etc/wsl.conf` com `service cron start` no boot:** já configurado (conferido 05/10).
-- [x] **Remote LATAM no cron (07:20):** instalado em 05/10; confirmar o 1º disparo em 06/10.
+- [x] **Cron removido (25/10/2026):** a automação das 07:00 e 07:20 foi desligada de propósito; tudo é manual (seção 4). Histórico: o cron chegou a disparar sozinho em 29/09, 30/09 e 01/10.
+- [x] **FreeHire** (API pública, LATAM + Brasil) e **Himalayas em modo busca** (query + `country: BR`) no catálogo remoto (25/10).
+- [x] **Prioridade `prio:1|2|3`** na fila e no `fresh-pending` (seção 6b); janela de 4 dias fora e dentro do Claude.
 
 **Risco de ToS:** LinkedIn e Vagas.com Search rodam sob uso pessoal restrito pelos próprios
 projetos. Volume baixo e frequência manual reduzem o risco de bloqueio, mas não o eliminam.
@@ -450,13 +408,13 @@ decidir isso de propósito.
 ## 12. Arquivos-chave
 
 ```
-scripts/run-daily-scan.sh     cron: Gupy → scan.mjs → ordena
+scripts/run-daily-scan.sh     manual: Gupy → scan.mjs → ordena
 scripts/run-manual-scan.sh    LinkedIn + Vagas.com (manual)
-scripts/run-remote-latam-scan.sh  boards remotos LATAM → fila (cron 07:20, seção 5b)
+scripts/run-remote-latam-scan.sh  boards remotos LATAM → fila (manual, seção 5b)
 scripts/scan-remote-latam.mjs funil dos boards remotos (catálogo remote-latam.yml)
 lib/latam-eligibility.mjs     filtro de região (LATAM / Brasil / worldwide)
 scripts/import-jobs.mjs       import + filtros + ordenação da fila
-scripts/import-config.sh      queries, filtros, JOBAGE, PATH do cron
+scripts/import-config.sh      queries, filtros, JOBAGE, PATH
 scripts/fresh-pending.mjs     seleção das vagas frescas
 fetch-jd.mjs                  JD via API do ATS, sem browser (pre-screen rápido)
 check-liveness.mjs            liveness zero-token (fresh pass e recortes manuais)
@@ -473,29 +431,27 @@ logs/                         logs e backups (fora do git)
 
 ## 13. Guia diário passo a passo, por cenário
 
-Um comando por passo. Rode na raiz do repo (`cd ~/career-ops`). `/career-ops ...` é dentro do Claude Code.
+Um comando por passo. Rode na raiz do repo (`cd ~/career-ops`). `/career-ops ...` é dentro do Claude Code. Versão curta: `CHECKLIST.md`.
 
-### A. Dia normal (cron rodou): 5-15 min
-1. `grep '=== ' logs/daily-scan.log logs/remote-latam-cron.log | tail -6` → `done` de hoje (~07:00 e ~07:20)
-2. `node scripts/fresh-pending.mjs` → quantas vagas frescas
-3. `/career-ops pipeline --fresh-only` → avalia só as com menos de 2 dias
-4. Score ≥ 4.0: `/career-ops pdf`, depois `/career-ops apply` (o sistema preenche; você clica Submit)
-5. Depois de enviar de verdade: `node set-status.mjs N Applied --on AAAA-MM-DD`, depois `node followup-seed.mjs N --date AAAA-MM-DD`
+### A. Dia normal (toda manhã): 10-20 min
+1. `scripts/run-daily-scan.sh` → Gupy + portais (termina com `daily-scan done`)
+2. `scripts/run-remote-latam-scan.sh` → boards remotos, FreeHire, Himalayas (termina com `remote-latam-scan done`)
+3. `node scripts/fresh-pending.mjs` → frescas dos últimos 4 dias, em ordem T1 → T2 → T3
+4. `/career-ops pipeline --fresh-only` → avalia nessa ordem
+5. Score ≥ 4.0: `/career-ops pdf`, depois `/career-ops apply` (o sistema preenche; você clica Submit)
+6. Depois de enviar de verdade: `node set-status.mjs N Applied --on AAAA-MM-DD`, depois `node followup-seed.mjs N --date AAAA-MM-DD`
 
-### B. Cron não disparou (WSL desligado às 07:00)
-1. `service cron status` → se parado: `sudo service cron start`
-2. `scripts/run-daily-scan.sh`
-3. `scripts/run-remote-latam-scan.sh`
-4. Siga o cenário A a partir do passo 2
+### B. Esqueceu um ou dois dias
+Igual ao A. A janela de 4 dias cobre até 3 dias sem rodar.
 
 ### C. Voltou de folga ou fim de semana (intervalo > 3 dias)
 1. `JOBAGE=7 scripts/run-daily-scan.sh`
 2. `JOBAGE=7 scripts/run-remote-latam-scan.sh`
-3. `node scripts/fresh-pending.mjs`; se o backlog estiver grande, avaliação por recorte (seção 7b)
+3. `node scripts/fresh-pending.mjs --days 7`; se o backlog estiver grande, avaliação por recorte (seção 7b), T1 e T2 primeiro
 
 ### D. Varredura manual (2-3x/semana: LinkedIn + Vagas.com)
 1. `scripts/run-manual-scan.sh --dry-run` → confere o funil
-2. `scripts/run-manual-scan.sh` (`JOBAGE=4 scripts/run-manual-scan.sh` se o intervalo passou de 3 dias)
+2. `scripts/run-manual-scan.sh` (`JOBAGE=6 scripts/run-manual-scan.sh` se o intervalo passou de 4 dias)
 3. `tail -3 logs/import-age.tsv` → se bateu no teto de página, `--pages 2` só nessa rodada
 
 ### E. Avaliar o backlog (2-3x/semana)
@@ -529,7 +485,7 @@ Um comando por passo. Rode na raiz do repo (`cd ~/career-ops`). `/career-ops ...
 ### J. Diagnóstico rápido
 | Sintoma | Comando |
 |---|---|
-| Sem `start` de hoje no log | `service cron status`, `crontab -l`; cenário B |
+| Scan de hoje não rodou | cenário A (nada é automático desde 25/10) |
 | `already running, skipping` | `pgrep -af 'run-daily-scan\|run-remote-latam'`; espere ou encerre o travado |
 | Fila fora de ordem | `node scripts/import-jobs.mjs --sort-only` |
 | Fila quebrada após limpeza | restaurar de `logs/pipeline.before-*.md` |

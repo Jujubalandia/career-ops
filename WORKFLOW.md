@@ -1,6 +1,7 @@
 # Career-Ops: End-to-End Workflow
 
 Normal job-search-to-application loop, split by **where** each step runs.
+One-screen command list: `CHECKLIST.md`. No cron: every scan is manual, window 4 days (`JOBAGE=4`); queue ordered `prio:1` remote-LATAM AI engineering → `prio:2` BR/remote data-AI manager-director (São Paulo hybrid) → `prio:3`.
 Deep reference: `docs/RUNBOOK-pipeline-diario.md` (PT), `docs/REMOTE-LATAM-SOURCES.md`, `docs/SCRIPTS.md`.
 
 > **Golden rules**
@@ -16,8 +17,8 @@ Deep reference: `docs/RUNBOOK-pipeline-diario.md` (PT), `docs/REMOTE-LATAM-SOURC
 ```
  OUTSIDE Claude Code (0 tokens)             INSIDE Claude Code (tokens)
  ──────────────────────────────             ───────────────────────────
- cron 07:00  run-daily-scan.sh   ┐
- cron 07:20  run-remote-latam    ├─► data/pipeline.md ─► /career-ops pipeline
+ manual      run-daily-scan.sh   ┐
+ manual      run-remote-latam    ├─► data/pipeline.md ─► /career-ops pipeline
  manual      run-manual-scan.sh  ┘      (the queue)        │
                                                             ▼
                                           reports/ + PDF + tracker row
@@ -34,8 +35,8 @@ Deep reference: `docs/RUNBOOK-pipeline-diario.md` (PT), `docs/REMOTE-LATAM-SOURC
 
 Outside:
 1. `node doctor.mjs` — checks `cv.md`, `config/profile.yml`, `modes/_profile.md`, `portals.yml`.
-2. `sudo service cron start` (WSL: already in `/etc/wsl.conf` boot command).
-3. Confirm cron lines: `crontab -l` (07:00 daily scan, 07:20 remote-LATAM).
+2. (cron removed on 2026-10-25; nothing to start.)
+3. Confirm no cron lines: `crontab -l` (should be empty).
 4. `npx playwright install chromium` (needed by `--verify`).
 
 Inside:
@@ -48,18 +49,14 @@ Inside:
 
 | What | Command | When |
 |---|---|---|
-| Gupy + `portals.yml` boards | `scripts/run-daily-scan.sh` | Cron 07:00 |
-| Remote LATAM boards | `scripts/run-remote-latam-scan.sh` | Cron 07:20 |
+| Gupy + `portals.yml` boards | `scripts/run-daily-scan.sh` | Manual, daily |
+| Remote LATAM boards | `scripts/run-remote-latam-scan.sh` | Manual, daily |
 | LinkedIn + Vagas.com | `scripts/run-manual-scan.sh` | Manual, 2-3x/week |
 | Whole-ATS keyword sweep | `npm run scan:full` | Occasional |
 
-Check the cron really fired (do this every morning):
-```bash
-grep '=== ' logs/daily-scan.log logs/remote-latam-cron.log | tail -6
-```
-No `start` from today ~07:00 → cron missed. Run the scripts by hand.
+Each run ends with `daily-scan done` / `remote-latam-scan done` in the terminal.
 
-Gap > 3 days: `JOBAGE=7 scripts/run-daily-scan.sh` (window is the `JOBAGE` env var, not a flag).
+Gap > 4 days: `JOBAGE=7 scripts/run-daily-scan.sh` (window is the `JOBAGE` env var, not a flag).
 
 Dry-run any scan: `DRY_RUN=1 scripts/run-daily-scan.sh` or `scripts/run-manual-scan.sh --dry-run`.
 
@@ -77,7 +74,7 @@ Open `claude` in `~/career-ops`.
    ```bash
    node scripts/fresh-pending.mjs
    ```
-2. Daily pass, only postings < 2 days old:
+2. Daily pass, only postings from the last 4 days (T1 → T2 → T3):
    ```
    /career-ops pipeline --fresh-only
    ```
@@ -173,8 +170,8 @@ Inside Claude: `/career-ops patterns` (after 20-30 new evaluations), `/career-op
 
 ## Daily cheat sheet (5-15 min)
 
-1. `grep '=== ' logs/daily-scan.log logs/remote-latam-cron.log | tail -6` — cron ran?
-2. `node scripts/fresh-pending.mjs` — how many fresh?
+1. `scripts/run-daily-scan.sh` then `scripts/run-remote-latam-scan.sh`
+2. `node scripts/fresh-pending.mjs` — fresh from the last 4 days, T1 → T2 → T3
 3. In Claude: `/career-ops pipeline --fresh-only`
 4. For each ≥ 4.0: `/career-ops pdf` → `/career-ops apply N` → review → Submit
 5. `node set-status.mjs N Applied --on DATE` → `node followup-seed.mjs N --date DATE`
@@ -188,7 +185,7 @@ Same pipeline via other runners (see `docs/RUNNING_ON_A_BUDGET.md`, `docs/SUPPOR
 npm run or:scan | or:pipeline | or:eval | or:apply   # OpenRouter runner
 node gemini-eval.mjs ...                              # legacy Gemini API evaluation
 codex exec "Run career-ops pipeline mode for data/pipeline.md"
-claude -p "Run career-ops pipeline --fresh-only"      # headless, cron-able
+claude -p "Run career-ops pipeline --fresh-only"      # headless
 ```
 Collection and tracker scripts (Phase 1, 5, 6, 7) are plain Node/bash and need no AI.
 
@@ -198,7 +195,7 @@ Collection and tracker scripts (Phase 1, 5, 6, 7) are plain Node/bash and need n
 
 | Symptom | Fix |
 |---|---|
-| No `start` today in log | `service cron status`; `sudo service cron start`; run scripts by hand |
+| Forgot to scan today | run the two scripts (window 4 days covers up to 3 missed days) |
 | `already running, skipping` | `pgrep -af 'run-daily-scan\|run-remote-latam'`; wait or kill |
 | Queue out of order | `node scripts/import-jobs.mjs --sort-only` |
 | `--verify requires Playwright` | `npx playwright install chromium` |

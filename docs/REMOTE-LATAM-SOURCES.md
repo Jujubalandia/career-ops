@@ -13,7 +13,7 @@ scripts/run-remote-latam-scan.sh --source getonbrd        # uma fonte (mesmo des
 scripts/run-remote-latam-scan.sh --verify --limit 20      # derruba links mortos, no máximo 20 linhas
 ```
 
-Sem `remote-latam.yml`, o scanner usa o template (avisa no stderr). O wrapper roda no cron às 07:20 (runbook, seção 4); à mão, os comandos acima servem para dias perdidos.
+Sem `remote-latam.yml`, o scanner usa o template (avisa no stderr). Sem cron desde 25/10/2026: o wrapper é um comando manual diário (`CHECKLIST.md`). A janela padrão é 4 dias.
 
 O funil, em ordem (`node scripts/scan-remote-latam.mjs --dry-run` mostra uma linha por fonte):
 
@@ -59,7 +59,8 @@ Entram no catálogo porque já existem, são gratuitos e trazem região:
 | Provider | Situação |
 |---|---|
 | `getonbrd` | Ativo. Board nativo da América Latina (categorias `machine-learning-ai`, `programming`, `operations-management`) |
-| `himalayas` | Ativo. Campo `locationRestrictions` separa "worldwide" de restrito |
+| `himalayas` | Ativo, **modo busca** (25/10/2026): `queries` + `country: BR` em `/jobs/api/search` (20 por página). O feed simples traz só as 50 mais novas de ~130k vagas. `locationRestrictions` vazio = sem restrição (vira `Worldwide`) |
+| `freehire` | Ativo. **Provider novo** (25/10/2026): API pública JSON (`/api/v1/jobs/search`, sem chave, 600 req/min; o `robots.txt` pede a API em vez do HTML). `regions: [latam]` + `countries: [br]` formam um grupo OR; a janela vira `posted_within_days`. O `meta.ignored_params` da API derruba a rodada (um filtro errado nunca vira varredura do catálogo inteiro). Reagrega boards que lemos direto (himalayas...): o dedup absorve |
 | `jobicy` | Ativo. Campo `jobGeo` |
 | `weworkremotely` | Ativo. RSS, local muitas vezes vazio |
 | `remoteyeah` | Ativo. **Provider novo** (RSS). `<location>` estruturado: traz vagas "Brazil" e "Latin America" |
@@ -86,6 +87,18 @@ Resultado: **2 boards valem provider**, ambos com termos que permitem a leitura.
 | TryRemotely | API JSON oficial, sem chave, 100 req/min; atribuição obrigatória (cumprida: toda linha aponta para a vaga no site) | Poucas por rodada, mas com `locations` estruturado |
 
 Os outros 76 feeds ficaram de fora: blogs de carreira (Collibra, careerday, aiapplyd), boards sem região no feed (tudo viraria `loc?`: jobsbylevel, pyjobs, typescriptjobs) ou centrados em EUA/Europa (aidevboard: 17 de 19 rejeitadas).
+
+## Prioridade (`prio:1|2|3`)
+
+Além da classe, toda linha leva `prio:N` no `note:` (`lib/job-priority.mjs`, zero token):
+
+| Tier | Regra |
+|---|---|
+| 1 | Remota e aberta a LATAM/Brasil, domínio `ai-ml-eng`, `ai-eval`, `data-science`, `data-eng` ou `governance` |
+| 2 | `data-ai-mgmt` (head, diretor, gerente de IA/Dados) remota aberta ao Brasil, ou com base em São Paulo (híbrido); `governance` em São Paulo |
+| 3 | O resto |
+
+"Remota" vem do `meta.work_mode` quando a fonte informa (FreeHire: só `remote` conta), senão do texto do local (`hybrid`/`on-site`/`presencial` tiram o tier). `sortPending` e `scripts/fresh-pending.mjs` ordenam por tier e, dentro dele, por data.
 
 ## Classificação
 
@@ -123,4 +136,7 @@ Limites: título decide, então "AI Task Auditor" e "Competitive Evaluations" fi
 node test-all.mjs --only remote-latam      # filtro de região + runner, sem rede
 node test-all.mjs --only job-class         # classificação de dados e IA
 node test-all.mjs --only aigigjobs         # provider do AIGigJobs
+node test-all.mjs --only freehire          # provider do FreeHire
+node test-all.mjs --only himalayas         # feed e modo busca do Himalayas
+node test-all.mjs --only job-priority      # tiers prio:1-3
 ```
