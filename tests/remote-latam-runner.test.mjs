@@ -122,9 +122,9 @@ try {
     `class gate replaces the title gate (the include/exclude regexes are ignored): ml, ds, emp kept (${gated.offers.map((o) => o.url.split('/').pop())})`);
   ok(gated.counts.droppedClass === 4 && gated.counts.droppedTitle === 0, `class drops: labelling, attorney, backend, and the unknown engagement (${gated.counts.droppedClass} of 4; title drops ${gated.counts.droppedTitle})`);
   ok(gated.counts.droppedRegion === 1, 'the region gate still runs after the class gate');
-  ok(gated.offers[0].note === 'remote-latam:gig freelance/ai-ml-eng $60-150/h', `label and pay in the note (${gated.offers[0].note})`);
-  ok(gated.offers[1].note === 'remote-latam:gig freelance/data-science', `label without pay (${gated.offers[1].note})`);
-  ok(gated.offers[2].note === 'remote-latam:gig employee/ai-ml-eng', `FULL_TIME is labelled employee (${gated.offers[2].note})`);
+  ok(gated.offers[0].note === 'remote-latam:gig freelance/ai-ml-eng $60-150/h prio:1', `label and pay in the note (${gated.offers[0].note})`);
+  ok(gated.offers[1].note === 'remote-latam:gig freelance/data-science prio:1', `label without pay (${gated.offers[1].note})`);
+  ok(gated.offers[2].note === 'remote-latam:gig employee/ai-ml-eng prio:1', `FULL_TIME is labelled employee (${gated.offers[2].note})`);
   const noEng = runFunnel(gigs, { sourceId: 'gig', filters, sinceDays: 7, snapshot: mk(), now: NOW, classes: CLASSES });
   ok(noEng.offers.some((o) => o.url.endsWith('/noeng')), '`classes` without `engagements` accepts an unknown engagement');
   ok(classGate({ domain: 'ai-ml-eng', engagement: 'unknown' }, { classes: CLASSES, engagements: ['employee'] }) === 'engagement'
@@ -133,9 +133,14 @@ try {
 
   // a source with no `classes` keeps the title gate AND still gets a label in the note
   const plain = runFunnel([job({ url: 'https://acme-test.example/jobs/lbl', title: 'AI Governance Lead' })], { sourceId: 'stub', filters, sinceDays: 7, snapshot: mk(), now: NOW });
-  ok(plain.offers[0]?.note === 'remote-latam:stub governance', `every source gets a class label (${plain.offers[0]?.note})`);
+  ok(plain.offers[0]?.note === 'remote-latam:stub governance prio:1', `every source gets a class label (${plain.offers[0]?.note})`);
   const plainLoc = runFunnel([job({ url: 'https://acme-test.example/jobs/lbl2', title: 'AI Engineer', location: '' })], { sourceId: 'stub', filters, sinceDays: 7, snapshot: mk(), now: NOW });
-  ok(plainLoc.offers[0]?.note === 'remote-latam:stub ai-ml-eng loc?', `label comes before loc? (${plainLoc.offers[0]?.note})`);
+  ok(plainLoc.offers[0]?.note === 'remote-latam:stub ai-ml-eng prio:1 loc?', `label comes before loc? (${plainLoc.offers[0]?.note})`);
+  // priority tier: a source that reports meta.work_mode decides remote-ness; otherwise the location does
+  const tierOf = (extra) => runFunnel([job({ url: `https://acme-test.example/jobs/t${Math.random()}`, title: 'AI Engineer', location: 'Brazil', ...extra })],
+    { sourceId: 'stub', filters, sinceDays: 7, snapshot: mk(), now: NOW }).offers[0]?.note.match(/prio:(\d)/)?.[1];
+  ok(tierOf({ meta: { work_mode: 'remote' } }) === '1' && tierOf({ meta: { work_mode: 'unknown' } }) === '3' && tierOf({ meta: { work_mode: 'hybrid' } }) === '3', 'meta.work_mode: only "remote" earns tier 1');
+  ok(tierOf({}) === '1' && tierOf({ location: 'Brazil (Hybrid)' }) === '3', 'no work_mode: the location text decides (hybrid is not tier 1)');
   ok(LOG_HEADER[LOG_HEADER.length - 1] === 'dropped_class', 'LOG_HEADER ends with dropped_class (older columns keep their positions)');
 
   // catalog: classes / engagements

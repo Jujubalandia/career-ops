@@ -14,6 +14,9 @@ import { fetchJsonWithRetry, sleep } from './_http.mjs';
 //   max_pages pages of `limit` rows per query, default 2
 //   limit     rows per page, default 50 (API cap 100)
 //
+// `meta.work_mode` is remote | hybrid | onsite | unknown; the remote-LATAM runner only treats
+// `remote` as remote for FreeHire rows (an aggregator row with no mode is not assumed remote).
+//
 // The window comes from ctx.sinceMs (posted_within_days); results are newest-first.
 // The API ignores unknown params instead of refusing them, and echoes that in
 // `meta.ignored_params` / `meta.ignored_values`: a non-empty echo throws, so a typo
@@ -96,7 +99,7 @@ export function normalizeFreehireJob(j) {
   const location = mode === 'remote' ? `${where || 'Remote'}${where ? ' (Remote)' : ''}` : mode === 'hybrid' ? `${where} (Hybrid)`.trim() : where;
 
   /** @type {{ title: string, url: string, company: string, location: string, description?: string, postedAt?: number, meta: object }} */
-  const job = { title, url, company: str(j.company) || '?', location, meta: { work_mode: mode || undefined } };
+  const job = { title, url, company: str(j.company) || '?', location, meta: { work_mode: mode || 'unknown' } };
   const postedAt = Date.parse(str(j.posted_at));
   if (Number.isFinite(postedAt)) job.postedAt = postedAt;
   const summary = str(j.enrichment?.summary);

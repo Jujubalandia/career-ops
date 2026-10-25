@@ -24,6 +24,7 @@ try {
   ok(j?.title === 'AI Engineer 1' && j.company === 'Acme' && j.location === 'Brazil (Remote)', 'maps title, company and location + work mode');
   ok(j?.postedAt === Date.parse(row(1).posted_at) && j.meta.employmentType === 'FULL_TIME' && j.description === 'Builds agents.', 'postedAt, employment type and summary travel');
   ok(normalizeFreehireJob(row(2, { location: '', countries: ['br', 'ar'], work_mode: 'hybrid' }))?.location === 'Brazil, Argentina (Hybrid)', 'no location text: country codes become names');
+  ok(normalizeFreehireJob(row(6, { work_mode: undefined }))?.meta.work_mode === 'unknown', 'no work mode: meta.work_mode is "unknown" (never assumed remote)');
   ok(normalizeFreehireJob(row(3, { closed_at: '2026-10-01T00:00:00Z' })) === null, 'closed posting dropped');
   ok(normalizeFreehireJob(row(4, { url: 'http://x.example/1' })) === null && normalizeFreehireJob(row(5, { title: ' ' })) === null, 'non-https url and empty title dropped');
   ok([null, 'x', 7].every((v) => normalizeFreehireJob(v) === null), 'non-objects dropped');

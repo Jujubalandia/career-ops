@@ -14,7 +14,7 @@ export PATH="$HOME/.bun/bin:$PATH"
 # Freshness window, in calendar days: anything posted longer ago is discarded before it
 # reaches data/pipeline.md (import: --jobage; scan.mjs: --since). Undated postings are kept
 # and counted. Override for one run:  JOBAGE=7 scripts/run-manual-scan.sh
-JOBAGE="${JOBAGE:-3}"
+JOBAGE="${JOBAGE:-4}"
 
 # Search profile (São Paulo hybrid/on-site, remote anywhere in Brazil, AI governance anywhere).
 CITY='São Paulo'
